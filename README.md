@@ -56,6 +56,11 @@ for your location and time. Tune everything from your phone.
 | Display link | micro-HDMI → HDMI | The Pi 5 uses **micro**-HDMI (not mini). |
 | Mount | Rotating 1/4-20 stand, pointed up | Lower the stand for a bigger image; tape **+ a safety tether**. |
 
+<p align="center">
+  <img src="docs/setup.jpg" alt="The build: short-throw projector pointing up at the ceiling, RTL-SDR dipole antenna on the cabinet" width="320">
+  <br><em>The build — short-throw projector pointing up, RTL-SDR dipole on the cabinet.</em>
+</p>
+
 You don't need any of this to try it — see Quick start.
 
 ## Quick start (local, no radio)
