@@ -48,6 +48,9 @@ export interface Config {
   mirrorX: boolean;
   /** Vertical flip (rarely needed; available for awkward mounts). */
   mirrorY: boolean;
+  /** Rotate only the text labels (so they read right-side-up from where you
+   *  lie), independent of the field rotation. Degrees. */
+  labelRotationDeg: number;
 
   // --- filtering ---
   minAltitudeFt: number;
@@ -114,6 +117,7 @@ export const DEFAULT_CONFIG: Config = {
   rotationDeg: 0,
   mirrorX: true,
   mirrorY: false,
+  labelRotationDeg: 0,
 
   minAltitudeFt: 100,
   maxAltitudeFt: 60000,

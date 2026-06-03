@@ -85,6 +85,10 @@ export function Control() {
           <Row label="Mirror vertically">
             <Toggle value={cfg.mirrorY} onChange={(v) => set({ mirrorY: v })} />
           </Row>
+          <Row label="Label rotation" hint="text only, not the map">
+            <Slider value={cfg.labelRotationDeg} min={0} max={355} step={5} unit="°"
+              onChange={(v) => set({ labelRotationDeg: v })} />
+          </Row>
           <Row label="Radius">
             <Slider value={cfg.radiusMiles} min={0.5} max={10} step={0.5} unit="mi"
               onChange={(v) => set({ radiusMiles: v })} />

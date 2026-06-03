@@ -293,6 +293,24 @@ export class Renderer {
     if (cfg.theme === "focus" && byNear.length) this.drawDetailPanel(cfg, byNear[0]);
   }
 
+  /**
+   * Run `draw` with the canvas rotated by `labelRotationDeg` around an anchor,
+   * so text reads upright from where the viewer lies without moving the field.
+   */
+  private withLabelRotation(cfg: Config, ax: number, ay: number, draw: () => void): void {
+    if (!cfg.labelRotationDeg) {
+      draw();
+      return;
+    }
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.translate(ax, ay);
+    ctx.rotate((cfg.labelRotationDeg * Math.PI) / 180);
+    ctx.translate(-ax, -ay);
+    draw();
+    ctx.restore();
+  }
+
   private screenHeading(tr: Track, tt: number, proj: ProjOpts): number {
     const a = this.sampleAt(tr, tt - 400, this.getConfig());
     const b = this.sampleAt(tr, tt + 400, this.getConfig());
@@ -358,7 +376,7 @@ export class Renderer {
           north: Math.cos((deg * Math.PI) / 180) * 1e6,
         };
         const p = project(dir, { ...proj, pxPerM: R / 1e6 });
-        ctx.fillText(label, p.x, p.y);
+        this.withLabelRotation(cfg, p.x, p.y, () => ctx.fillText(label, p.x, p.y));
       }
       try {
         ctx.letterSpacing = "0px";
@@ -586,24 +604,26 @@ export class Renderer {
 
   private skyLabel(p: Point, text: string, cfg: Config, alpha: number, color = "#AEB6C6"): void {
     const ctx = this.ctx;
-    ctx.save();
-    ctx.font = `300 10px ${cfg.fonts.label}`;
-    ctx.fillStyle = color;
-    ctx.globalAlpha = alpha;
-    ctx.textAlign = "left";
-    ctx.textBaseline = "middle";
-    try {
-      ctx.letterSpacing = "1px";
-    } catch {
-      /* noop */
-    }
-    ctx.fillText(text, p.x + 5, p.y);
-    try {
-      ctx.letterSpacing = "0px";
-    } catch {
-      /* noop */
-    }
-    ctx.restore();
+    this.withLabelRotation(cfg, p.x, p.y, () => {
+      ctx.save();
+      ctx.font = `300 10px ${cfg.fonts.label}`;
+      ctx.fillStyle = color;
+      ctx.globalAlpha = alpha;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      try {
+        ctx.letterSpacing = "1px";
+      } catch {
+        /* noop */
+      }
+      ctx.fillText(text, p.x + 5, p.y);
+      try {
+        ctx.letterSpacing = "0px";
+      } catch {
+        /* noop */
+      }
+      ctx.restore();
+    });
   }
 
   // --- window to elsewhere: faint great-circle arc toward destination ---
@@ -826,54 +846,62 @@ export class Renderer {
     // Hairline leader from glyph to the nearest edge of the label.
     const anchorX = box.x + w / 2 < v.p.x ? box.x + w : box.x;
     const anchorY = Math.max(box.y, Math.min(v.p.y, box.y + h));
-    ctx.save();
-    ctx.strokeStyle = rgba(hexToRgb(cfg.palette.text), 0.24 * a);
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(v.p.x, v.p.y);
-    ctx.lineTo(anchorX, anchorY);
-    ctx.stroke();
+    // Rotate the whole label (leader + text) around the glyph so it reads
+    // upright from where you lie, without disturbing the field.
+    this.withLabelRotation(cfg, v.p.x, v.p.y, () => {
+      ctx.save();
+      ctx.strokeStyle = rgba(hexToRgb(cfg.palette.text), 0.24 * a);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(v.p.x, v.p.y);
+      ctx.lineTo(anchorX, anchorY);
+      ctx.stroke();
 
-    ctx.textAlign = "left";
-    ctx.textBaseline = "top";
-    ctx.shadowColor = "rgba(0,0,0,0.9)";
-    ctx.shadowBlur = 6;
-    let y = box.y;
-    for (const ln of lines) {
-      if (ln.kind === "title") {
-        ctx.font = `500 14px ${cfg.fonts.label}`;
-        ctx.fillStyle = rgba([245, 247, 255], a);
-        try {
-          ctx.letterSpacing = "1.5px";
-        } catch {
-          /* noop */
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      ctx.shadowColor = "rgba(0,0,0,0.9)";
+      ctx.shadowBlur = 6;
+      let y = box.y;
+      for (const ln of lines) {
+        if (ln.kind === "title") {
+          ctx.font = `500 14px ${cfg.fonts.label}`;
+          ctx.fillStyle = rgba([245, 247, 255], a);
+          try {
+            ctx.letterSpacing = "1.5px";
+          } catch {
+            /* noop */
+          }
+        } else {
+          ctx.font = `400 11px ${cfg.fonts.label}`;
+          ctx.fillStyle = rgba(hexToRgb(cfg.palette.text), 0.82 * a);
+          try {
+            ctx.letterSpacing = "0.5px";
+          } catch {
+            /* noop */
+          }
         }
-      } else {
-        ctx.font = `400 11px ${cfg.fonts.label}`;
-        ctx.fillStyle = rgba(hexToRgb(cfg.palette.text), 0.82 * a);
-        try {
-          ctx.letterSpacing = "0.5px";
-        } catch {
-          /* noop */
-        }
+        ctx.fillText(ln.text, box.x, y);
+        y += lh;
       }
-      ctx.fillText(ln.text, box.x, y);
-      y += lh;
-    }
-    try {
-      ctx.letterSpacing = "0px";
-    } catch {
-      /* noop */
-    }
-    ctx.restore();
+      try {
+        ctx.letterSpacing = "0px";
+      } catch {
+        /* noop */
+      }
+      ctx.restore();
+    });
   }
 
   private drawDetailPanel(cfg: Config, v: Visible): void {
-    const ctx = this.ctx;
     const ac = v.tr.ac;
-    ctx.save();
     const x = 40;
     const y = this.h - 120;
+    this.withLabelRotation(cfg, x, y, () => this.drawDetailPanelText(cfg, v, ac, x, y));
+  }
+
+  private drawDetailPanelText(cfg: Config, v: Visible, ac: Aircraft, x: number, y: number): void {
+    const ctx = this.ctx;
+    ctx.save();
     ctx.shadowColor = "rgba(0,0,0,0.9)";
     ctx.shadowBlur = 10;
     ctx.textAlign = "left";
