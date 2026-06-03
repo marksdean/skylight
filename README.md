@@ -9,8 +9,8 @@
 </p>
 
 <p align="center">
-  <video src="https://github.com/cpaczek/skylight/raw/main/docs/demo.mp4" controls muted loop width="360"></video>
-  <br><em>Skylight on the ceiling, in action.</em>
+  <a href="docs/demo.mp4"><img src="docs/demo.gif" alt="Skylight projected on a real ceiling, in action" width="300"></a>
+  <br><em>Running on a real ceiling — <a href="docs/demo.mp4">watch the full clip</a>.</em>
 </p>
 
 Skylight decodes ADS-B from a cheap RTL-SDR radio and renders the planes physically
