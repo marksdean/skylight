@@ -14,6 +14,7 @@ import { Poller } from "./datasource.js";
 import { Hub } from "./hub.js";
 import { TleStore } from "./tle.js";
 import { AirportLookup } from "./airport-lookup.js";
+import { fetchCarrierLogo } from "./carrier-logos.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = resolve(__dirname, "../data");
@@ -100,6 +101,12 @@ async function main(): Promise<void> {
     const ap = await airportLookup.getAirport(String(req.params.icao).toUpperCase());
     if (!ap) return res.status(404).json({ error: "airport not found" });
     res.json(ap);
+  });
+  app.get("/api/carrier-logo/:iata", async (req, res) => {
+    const logo = await fetchCarrierLogo(String(req.params.iata));
+    if (!logo) return res.status(404).end();
+    res.set("Cache-Control", "public, max-age=604800");
+    res.type(logo.contentType).send(logo.body);
   });
   app.post("/api/source", (req, res) => {
     const s = req.body?.source;

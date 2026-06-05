@@ -232,6 +232,21 @@ export function Control() {
             <Slider value={cfg.glyphSizePx} min={6} max={40} step={1} unit="px"
               onChange={(v) => set({ glyphSizePx: v })} />
           </Row>
+          <Row label="Carrier badge" hint="under each glyph">
+            <Toggle value={cfg.showCarrierBadge} onChange={(v) => set({ showCarrierBadge: v })} />
+          </Row>
+          {cfg.showCarrierBadge && (
+            <Row label="Badge style">
+              <Segmented
+                value={cfg.carrierBadgeStyle}
+                options={[
+                  { value: "code", label: "Code" },
+                  { value: "logo", label: "Logo" },
+                ]}
+                onChange={(v) => set({ carrierBadgeStyle: v })}
+              />
+            </Row>
+          )}
           <Row label="Trail length">
             <Slider value={cfg.trailSeconds} min={0} max={120} step={5} unit="s"
               onChange={(v) => set({ trailSeconds: v })} />

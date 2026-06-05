@@ -77,6 +77,10 @@ export interface Config {
   palette: Palette;
   fonts: Fonts;
   glyphSizePx: number;
+  /** Show a small carrier code badge on each aircraft glyph. */
+  showCarrierBadge: boolean;
+  /** Carrier badge style: ICAO code text or airline logo icon. */
+  carrierBadgeStyle: "code" | "logo";
   /** Color the glyph by altitude. */
   altitudeColor: boolean;
   trailSeconds: number;
@@ -152,6 +156,8 @@ export const DEFAULT_CONFIG: Config = {
     mono: "'JetBrains Mono', ui-monospace, monospace",
   },
   glyphSizePx: 22,
+  showCarrierBadge: true,
+  carrierBadgeStyle: "code",
   altitudeColor: true,
   trailSeconds: 45,
   brightness: 1,

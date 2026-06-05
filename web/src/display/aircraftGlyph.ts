@@ -55,6 +55,38 @@ const LIGHT = new Set([
   "RV6", "RV7", "RV8", "RV9", "RV10", "RV14", "GA8", "G115", "BL8", "CH7", "SF50",
 ]);
 
+const AIRLINE_SUFFIX = /^(air|airline|airlines|airways)$/i;
+
+/** ICAO telephony prefix from callsign (e.g. UAL123 → UAL), when present. */
+export function carrierCodeFromCallsign(flight?: string): string | undefined {
+  const cs = flight?.trim().toUpperCase();
+  if (!cs || cs.length < 4) return undefined;
+  const prefix = cs.slice(0, 3);
+  if (!/^[A-Z]{3}$/.test(prefix) || !/\d/.test(cs[3])) return undefined;
+  return prefix;
+}
+
+/** Short carrier label for glyph badges — callsign prefix, else airline initials. */
+export function carrierBadge(ac: Aircraft): string | undefined {
+  const fromCallsign = carrierCodeFromCallsign(ac.flight);
+  if (fromCallsign) return fromCallsign;
+  if (!ac.airline) return undefined;
+  const words = ac.airline
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w && !AIRLINE_SUFFIX.test(w));
+  if (words.length >= 2) return `${words[0][0]}${words[1][0]}`.toUpperCase();
+  const word = words[0] ?? ac.airline.trim();
+  return word.slice(0, 3).toUpperCase();
+}
+
+/** Stable accent hue (0–360) for a carrier code — same airline, same color. */
+export function carrierHue(code: string): number {
+  let h = 0;
+  for (let i = 0; i < code.length; i++) h = (h * 31 + code.charCodeAt(i)) >>> 0;
+  return h % 360;
+}
+
 export function classifyGlyph(ac: Aircraft): GlyphKind {
   const code = (ac.typeCode || "").toUpperCase();
   const cat = ac.category;

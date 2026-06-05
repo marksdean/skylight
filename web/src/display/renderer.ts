@@ -24,7 +24,15 @@ import {
   type Point,
 } from "@shared/index.js";
 import { getAirport } from "@shared/airport-resolve.js";
-import { classifyGlyph, drawAircraftGlyph, GLYPH_SCALE } from "./aircraftGlyph.js";
+import { carrierIata } from "@shared/carriers.js";
+import {
+  carrierBadge,
+  carrierHue,
+  classifyGlyph,
+  drawAircraftGlyph,
+  GLYPH_SCALE,
+} from "./aircraftGlyph.js";
+import { carrierLogos } from "../lib/carrierLogos.js";
 import { computeSky, type Sky, type Tle } from "./celestial.js";
 import { ASTERISMS } from "./stars.js";
 
@@ -734,6 +742,73 @@ export class Renderer {
 
     drawAircraftGlyph(ctx, kind, s, color, v.alpha, this.frameT, hexSeed(v.tr.ac.hex));
     ctx.restore();
+
+    if (cfg.showCarrierBadge && cfg.glyphSizePx >= 10) {
+      this.drawCarrierBadge(cfg, v, s);
+    }
+  }
+
+  /** Small upright carrier badge (code or logo) tucked under the glyph. */
+  private drawCarrierBadge(cfg: Config, v: Visible, glyphScale: number): void {
+    const code = carrierBadge(v.tr.ac);
+    if (!code) return;
+
+    const ctx = this.ctx;
+    const a = v.alpha;
+    if (a < 0.08) return;
+
+    const iata = carrierIata(v.tr.ac);
+    if (cfg.carrierBadgeStyle === "logo" && iata) {
+      const img = carrierLogos.request(iata);
+      if (img) {
+        const size = Math.max(14, Math.min(22, cfg.glyphSizePx * 0.82));
+        const y = v.p.y + glyphScale * 1.02 + size * 0.45;
+        this.withLabelRotation(cfg, v.p.x, y, () => {
+          const x = v.p.x - size / 2;
+          const top = y - size / 2;
+          ctx.save();
+          ctx.globalAlpha = a;
+          ctx.fillStyle = rgba([255, 255, 255], 0.94);
+          ctx.beginPath();
+          ctx.roundRect(x, top, size, size, 4);
+          ctx.fill();
+          ctx.strokeStyle = rgba([255, 255, 255], 0.28);
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          const pad = Math.max(2, size * 0.12);
+          ctx.drawImage(img, x + pad, top + pad, size - pad * 2, size - pad * 2);
+          ctx.restore();
+        });
+        return;
+      }
+    }
+
+    const fontSize = Math.max(8, Math.min(11, cfg.glyphSizePx * 0.42));
+    const padX = 4;
+    const padY = 2;
+    const y = v.p.y + glyphScale * 1.05 + fontSize * 0.35;
+
+    this.withLabelRotation(cfg, v.p.x, y, () => {
+      ctx.font = `600 ${fontSize}px ${cfg.fonts.mono}`;
+      const w = ctx.measureText(code).width + padX * 2;
+      const h = fontSize + padY * 2;
+      const x = v.p.x - w / 2;
+      const top = y - h / 2;
+
+      ctx.fillStyle = `hsla(${carrierHue(code)}, 52%, 38%, ${0.88 * a})`;
+      ctx.beginPath();
+      ctx.roundRect(x, top, w, h, 3);
+      ctx.fill();
+
+      ctx.strokeStyle = rgba([255, 255, 255], 0.22 * a);
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      ctx.fillStyle = rgba([255, 255, 255], 0.92 * a);
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(code, v.p.x, y);
+    });
   }
 
   // --- labels: restrained typography, nearest only ---
