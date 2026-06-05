@@ -91,3 +91,21 @@ export function deadReckon(
 }
 
 export const EMERGENCY_SQUAWKS = new Set(["7500", "7600", "7700"]);
+
+const EARTH_RADIUS_MI = 3958.8;
+
+/** Great-circle distance in miles. */
+export function greatCircleMiles(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number,
+): number {
+  const p1 = lat1 * DEG;
+  const p2 = lat2 * DEG;
+  const dp = (lat2 - lat1) * DEG;
+  const dl = (lon2 - lon1) * DEG;
+  const a =
+    Math.sin(dp / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2;
+  return 2 * EARTH_RADIUS_MI * Math.asin(Math.sqrt(a));
+}

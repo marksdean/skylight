@@ -93,6 +93,22 @@ export function Segmented<T extends string>({
   );
 }
 
+export function Select({
+  value,
+  onChange,
+  children,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  children: ReactNode;
+}) {
+  return (
+    <select className="select" value={value} onChange={(e) => onChange(e.target.value)}>
+      {children}
+    </select>
+  );
+}
+
 export function ColorRow({
   label,
   value,

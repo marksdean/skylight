@@ -1,8 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Config, ShowFields } from "@shared/index.js";
+import {
+  AIRPORT_CATALOG,
+  getAirport,
+  listAirportGroups,
+  type NearbyAirportSummary,
+} from "@shared/airport-resolve.js";
+import { fetchNearbyAirports, selectAirport } from "../lib/airportApi.js";
+import { useAirportLoader } from "../lib/useAirportLoader.js";
 import { useStream } from "../lib/useStream.js";
 import { nextISSPass, type Tle } from "../display/celestial.js";
-import { ColorRow, Row, Section, Segmented, Slider, Toggle } from "./components.js";
+import { ColorRow, Row, Section, Segmented, Select, Slider, Toggle } from "./components.js";
 
 function skyTimeLabel(offsetMin: number): string {
   if (offsetMin === 0) return "live";
@@ -48,6 +56,59 @@ export function Control() {
     [tles, cfg?.centerLat, cfg?.centerLon],
   );
 
+  const [nearby, setNearby] = useState<NearbyAirportSummary[]>([]);
+  const [nearbyLoading, setNearbyLoading] = useState(false);
+  const [nearbyError, setNearbyError] = useState<string | null>(null);
+  useAirportLoader(cfg?.airportIcao);
+
+  const staticIcaos = useMemo(
+    () => new Set(listAirportGroups().flatMap((g) => g.icaos)),
+    [],
+  );
+  const selectedEntry = cfg ? getAirport(cfg.airportIcao) : undefined;
+  const selectedIsDynamic =
+    !!cfg && !staticIcaos.has(cfg.airportIcao) && !nearby.some((ap) => ap.icao === cfg.airportIcao);
+
+  async function pickAirport(icao: string): Promise<void> {
+    try {
+      const patch = await selectAirport(icao);
+      conn.patchConfig(patch);
+    } catch {
+      setNearbyError("Could not load that airport.");
+    }
+  }
+
+  function findAirportsNearMe(): void {
+    if (!navigator.geolocation) {
+      setNearbyError("Geolocation is not available in this browser.");
+      return;
+    }
+    setNearbyLoading(true);
+    setNearbyError(null);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          const hits = await fetchNearbyAirports(pos.coords.latitude, pos.coords.longitude);
+          setNearby(hits);
+          if (!hits.length) setNearbyError("No scheduled airports with runways found within 120 mi.");
+        } catch {
+          setNearbyError("Could not search for nearby airports.");
+        } finally {
+          setNearbyLoading(false);
+        }
+      },
+      (err) => {
+        setNearbyLoading(false);
+        setNearbyError(
+          err.code === err.PERMISSION_DENIED
+            ? "Location permission denied."
+            : "Could not determine your location.",
+        );
+      },
+      { enableHighAccuracy: false, timeout: 15000, maximumAge: 60000 },
+    );
+  }
+
   if (!cfg) {
     return (
       <div className="loading">
@@ -74,6 +135,64 @@ export function Control() {
       </header>
 
       <main>
+        <Section title="Location">
+          <Row label="Airport" hint="runways + map center">
+            <Select
+              value={cfg.airportIcao}
+              onChange={(icao) => void pickAirport(icao)}
+            >
+              {nearby.length > 0 && (
+                <optgroup label="Near you">
+                  {nearby.map((ap) => (
+                    <option key={ap.icao} value={ap.icao}>
+                      {ap.label} ({ap.distanceMi} mi)
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {selectedIsDynamic && selectedEntry && (
+                <optgroup label="Selected">
+                  <option value={selectedEntry.icao}>{selectedEntry.label}</option>
+                </optgroup>
+              )}
+              {listAirportGroups().map((group) => (
+                <optgroup key={group.label} label={group.label}>
+                  {group.icaos.map((icao) => (
+                    <option key={icao} value={icao}>
+                      {AIRPORT_CATALOG[icao]?.label ?? icao}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </Select>
+          </Row>
+          <div className="chips">
+            <button
+              type="button"
+              className={`chip ${nearbyLoading ? "on" : ""}`}
+              disabled={nearbyLoading}
+              onClick={findAirportsNearMe}
+            >
+              {nearbyLoading ? "Locating…" : "Airports near me"}
+            </button>
+          </div>
+          {nearbyError && <div className="hint error">{nearbyError}</div>}
+          {nearby.length > 0 && (
+            <div className="chips">
+              {nearby.map((ap) => (
+                <button
+                  key={ap.icao}
+                  type="button"
+                  className={`chip ${cfg.airportIcao === ap.icao ? "on" : ""}`}
+                  onClick={() => void pickAirport(ap.icao)}
+                >
+                  {ap.iata || ap.icao} · {ap.distanceMi} mi
+                </button>
+              ))}
+            </div>
+          )}
+        </Section>
+
         <Section title="Calibration">
           <Row label="Rotation" hint="align field to ceiling">
             <Slider value={cfg.rotationDeg} min={0} max={355} step={5} unit="°"

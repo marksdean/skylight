@@ -1,3 +1,5 @@
+import { DEFAULT_AIRPORT_ICAO, airportConfigPatch } from "./airport-resolve.js";
+
 // Central, fully-adjustable configuration for the ceiling tracker.
 // This object is the single source of truth shared between the display
 // (projector) and the control panel (phone). Everything here is live-tunable
@@ -37,6 +39,8 @@ export interface ShowFields {
 
 export interface Config {
   // --- location & scope ---
+  /** ICAO code for the home airport (runways + default map center). */
+  airportIcao: string;
   centerLat: number;
   centerLon: number;
   radiusMiles: number;
@@ -110,11 +114,12 @@ export interface Config {
   showRouteDetail: boolean;
 }
 
+const defaultAirport = airportConfigPatch(DEFAULT_AIRPORT_ICAO);
+
 export const DEFAULT_CONFIG: Config = {
-  // Default center: San Francisco International (SFO). Set this to your own
-  // location — ideally where you'll be looking up at the ceiling.
-  centerLat: 37.6213,
-  centerLon: -122.379,
+  airportIcao: defaultAirport.airportIcao,
+  centerLat: defaultAirport.centerLat,
+  centerLon: defaultAirport.centerLon,
   radiusMiles: 3,
 
   rotationDeg: 0,

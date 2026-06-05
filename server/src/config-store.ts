@@ -3,7 +3,7 @@
 
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
-import { DEFAULT_CONFIG, mergeConfig, type Config } from "@shared/index.js";
+import { DEFAULT_CONFIG, mergeConfig, nearestAirportIcao, type Config } from "@shared/index.js";
 
 type Listener = (config: Config) => void;
 
@@ -17,7 +17,14 @@ export class ConfigStore {
   async load(): Promise<void> {
     try {
       const raw = await readFile(this.path, "utf8");
-      this.config = mergeConfig(DEFAULT_CONFIG, JSON.parse(raw) as Partial<Config>);
+      const parsed = JSON.parse(raw) as Partial<Config>;
+      this.config = mergeConfig(DEFAULT_CONFIG, parsed);
+      if (parsed.airportIcao == null) {
+        this.config.airportIcao = nearestAirportIcao(
+          this.config.centerLat,
+          this.config.centerLon,
+        );
+      }
     } catch {
       this.config = DEFAULT_CONFIG; // first run
     }

@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type { Config, Theme } from "@shared/index.js";
 import { DEFAULT_CONFIG } from "@shared/index.js";
 import { useStream } from "../lib/useStream.js";
+import { useAirportLoader } from "../lib/useAirportLoader.js";
 import { Renderer } from "./renderer.js";
 
 const THEMES: Theme[] = ["ambient", "telemetry", "focus"];
@@ -14,6 +15,7 @@ export function Display() {
   // Keep the latest config in a ref so the RAF loop always reads fresh values.
   const configRef = useRef<Config>(state.config ?? DEFAULT_CONFIG);
   configRef.current = state.config ?? DEFAULT_CONFIG;
+  useAirportLoader(state.config?.airportIcao);
 
   // Create renderer once.
   useEffect(() => {

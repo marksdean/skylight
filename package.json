@@ -11,7 +11,8 @@
     "dev:web": "pnpm -F web dev",
     "build": "pnpm -F web build",
     "start": "pnpm -F server start",
-    "typecheck": "tsc -p shared/tsconfig.json && pnpm -F server typecheck && pnpm -F web typecheck"
+    "typecheck": "tsc -p shared/tsconfig.json && pnpm -F server typecheck && pnpm -F web typecheck",
+    "generate:airports": "node scripts/generate-airports.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",

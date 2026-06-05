@@ -13,6 +13,7 @@ import { RouteEnricher } from "./enrich/routes.js";
 import { Poller } from "./datasource.js";
 import { Hub } from "./hub.js";
 import { TleStore } from "./tle.js";
+import { AirportLookup } from "./airport-lookup.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = resolve(__dirname, "../data");
@@ -43,6 +44,12 @@ async function main(): Promise<void> {
 
   const tleStore = new TleStore(resolve(DATA_DIR, "tle-cache.json"));
   await tleStore.load();
+
+  const airportLookup = new AirportLookup(
+    resolve(__dirname, "../../data/airports.csv"),
+    resolve(__dirname, "../../data/runways.csv"),
+  );
+  await airportLookup.load();
 
   const app = express();
   app.use(express.json());
@@ -75,6 +82,25 @@ async function main(): Promise<void> {
   app.get("/api/aircraft", (_req, res) => res.json(poller.getSnapshot()));
   app.get("/api/status", (_req, res) => res.json(poller.getStatus()));
   app.get("/api/tle", async (_req, res) => res.json(await tleStore.get()));
+  app.get("/api/airports/nearby", async (req, res) => {
+    const lat = Number(req.query.lat);
+    const lon = Number(req.query.lon);
+    const limit = Number(req.query.limit ?? 12);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      return res.status(400).json({ error: "lat and lon are required numbers" });
+    }
+    const nearby = await airportLookup.findNearby(
+      lat,
+      lon,
+      Number.isFinite(limit) ? Math.min(30, Math.max(1, limit)) : 12,
+    );
+    res.json(nearby);
+  });
+  app.get("/api/airports/:icao", async (req, res) => {
+    const ap = await airportLookup.getAirport(String(req.params.icao).toUpperCase());
+    if (!ap) return res.status(404).json({ error: "airport not found" });
+    res.json(ap);
+  });
   app.post("/api/source", (req, res) => {
     const s = req.body?.source;
     if (s !== "radio" && s !== "api") {

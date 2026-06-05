@@ -89,18 +89,17 @@ export function drawAircraftGlyph(
 
   switch (kind) {
     case "widebody":
-      jetBody(ctx, s, { fw: 0.22, nose: -1.16, tail: 1.06, span: 1.16, tipY: 0.5 });
-      fillAndEngines(ctx, s, color, alpha, [0.42, 0.66]);
+      fillJetSilhouette(ctx, s, { fw: 0.22, nose: -1.16, tail: 1.06, span: 1.16, tipY: 0.5 }, color, alpha);
+      fillEngines(ctx, s, color, alpha, [0.42, 0.66]);
       core(ctx, s, alpha, 0.1);
       break;
     case "quadjet":
-      jetBody(ctx, s, { fw: 0.22, nose: -1.2, tail: 1.08, span: 1.2, tipY: 0.5 });
-      fillAndEngines(ctx, s, color, alpha, [0.34, 0.55, 0.74, 0.95].map((x) => x * 0.95));
+      fillJetSilhouette(ctx, s, { fw: 0.22, nose: -1.2, tail: 1.08, span: 1.2, tipY: 0.5 }, color, alpha);
+      fillEngines(ctx, s, color, alpha, [0.34, 0.55, 0.74, 0.95].map((x) => x * 0.95));
       core(ctx, s, alpha, 0.1);
       break;
     case "turboprop":
-      jetBody(ctx, s, { fw: 0.2, nose: -1.0, tail: 0.96, span: 1.04, tipY: 0.34, straight: true });
-      ctx.fill();
+      fillJetSilhouette(ctx, s, { fw: 0.2, nose: -1.0, tail: 0.96, span: 1.04, tipY: 0.34, straight: true }, color, alpha);
       ctx.shadowBlur = 0;
       // Props in place of nacelles, spinning.
       propDisc(ctx, -0.5 * s, 0.18 * s, 0.26 * s, color, alpha, t * 9 + seed);
@@ -108,15 +107,13 @@ export function drawAircraftGlyph(
       core(ctx, s, alpha, 0.09);
       break;
     case "light":
-      lightBody(ctx, s);
-      ctx.fill();
+      fillLightSilhouette(ctx, s, color, alpha);
       ctx.shadowBlur = 0;
       // Single nose prop, spinning.
       propDisc(ctx, 0, -0.95 * s, 0.34 * s, color, alpha, t * 11 + seed);
       break;
     case "helicopter":
-      heliBody(ctx, s);
-      ctx.fill();
+      fillHeliSilhouette(ctx, s, color, alpha);
       ctx.shadowBlur = 0;
       // Tail rotor (small, fast) then main rotor (large, over the body).
       propDisc(ctx, 0.04 * s, 1.18 * s, 0.22 * s, color, alpha, t * 16 + seed, false, 2);
@@ -124,8 +121,8 @@ export function drawAircraftGlyph(
       break;
     case "airliner":
     default:
-      jetBody(ctx, s, { fw: 0.2, nose: -1.06, tail: 0.98, span: 1.05, tipY: 0.52 });
-      fillAndEngines(ctx, s, color, alpha, [0.46]);
+      fillJetSilhouette(ctx, s, { fw: 0.2, nose: -1.06, tail: 0.98, span: 1.05, tipY: 0.52 }, color, alpha);
+      fillEngines(ctx, s, color, alpha, [0.46]);
       core(ctx, s, alpha, 0.1);
       break;
   }
@@ -140,12 +137,22 @@ interface JetOpts {
   straight?: boolean;
 }
 
-/** Trace fuselage + swept (or straight) wings + tailplane into the current path. */
-function jetBody(ctx: CanvasRenderingContext2D, s: number, o: JetOpts): void {
-  const sweep = o.straight ? 0.18 : 0.54; // wing leading-edge sweep depth
+function fillSilhouette(ctx: CanvasRenderingContext2D, color: RGB, alpha: number): void {
+  ctx.fillStyle = col(color, Math.min(1, alpha * 1.08));
+  ctx.fill();
+}
+
+/** Fill fuselage, wings, and tail as separate paths to avoid winding-rule holes. */
+function fillJetSilhouette(
+  ctx: CanvasRenderingContext2D,
+  s: number,
+  o: JetOpts,
+  color: RGB,
+  alpha: number,
+): void {
+  const sweep = o.straight ? 0.18 : 0.54;
+  // Wings first, then fuselage on top so the roots read cleanly.
   ctx.beginPath();
-  ctx.roundRect((-o.fw * s) / 2, o.nose * s, o.fw * s, (o.tail - o.nose) * s, (o.fw * s) / 2);
-  // Main wings.
   ctx.moveTo(-0.09 * s, -0.02 * s);
   ctx.lineTo(-o.span * s, sweep * s);
   ctx.lineTo(-(o.span - 0.1) * s, (sweep + 0.06) * s);
@@ -155,8 +162,14 @@ function jetBody(ctx: CanvasRenderingContext2D, s: number, o: JetOpts): void {
   ctx.lineTo(o.span * s, sweep * s);
   ctx.lineTo(0.09 * s, -0.02 * s);
   ctx.closePath();
-  // Tailplane.
+  fillSilhouette(ctx, color, alpha);
+
+  ctx.beginPath();
+  ctx.roundRect((-o.fw * s) / 2, o.nose * s, o.fw * s, (o.tail - o.nose) * s, (o.fw * s) / 2);
+  fillSilhouette(ctx, color, alpha);
+
   const ty = o.tail - 0.24;
+  ctx.beginPath();
   ctx.moveTo(-0.08 * s, ty * s);
   ctx.lineTo(-0.44 * s, (ty + 0.23) * s);
   ctx.lineTo(-0.37 * s, (ty + 0.27) * s);
@@ -166,10 +179,11 @@ function jetBody(ctx: CanvasRenderingContext2D, s: number, o: JetOpts): void {
   ctx.lineTo(0.44 * s, (ty + 0.23) * s);
   ctx.lineTo(0.08 * s, ty * s);
   ctx.closePath();
+  fillSilhouette(ctx, color, alpha);
 }
 
-/** Fill the traced jet body, then add engine nacelles at the given |x| offsets. */
-function fillAndEngines(
+/** Engine nacelles at the given |x| offsets. */
+function fillEngines(
   ctx: CanvasRenderingContext2D,
   s: number,
   color: RGB,
@@ -178,19 +192,20 @@ function fillAndEngines(
 ): void {
   for (const ex of xs) {
     for (const sign of [-1, 1]) {
-      ctx.moveTo(sign * ex * s + 0.07 * s, 0.24 * s);
+      ctx.beginPath();
       ctx.ellipse(sign * ex * s, 0.24 * s, 0.07 * s, 0.13 * s, 0, 0, Math.PI * 2);
+      fillSilhouette(ctx, color, alpha);
     }
   }
-  ctx.fillStyle = col(color, Math.min(1, alpha * 1.08));
-  ctx.fill();
 }
 
-/** Small high-wing single (Cessna-like). */
-function lightBody(ctx: CanvasRenderingContext2D, s: number): void {
+function fillLightSilhouette(
+  ctx: CanvasRenderingContext2D,
+  s: number,
+  color: RGB,
+  alpha: number,
+): void {
   ctx.beginPath();
-  ctx.roundRect(-0.11 * s, -0.85 * s, 0.22 * s, 1.7 * s, 0.11 * s);
-  // Straight high wings.
   ctx.moveTo(-0.1 * s, -0.34 * s);
   ctx.lineTo(-1.0 * s, -0.18 * s);
   ctx.lineTo(-1.0 * s, -0.02 * s);
@@ -200,7 +215,13 @@ function lightBody(ctx: CanvasRenderingContext2D, s: number): void {
   ctx.lineTo(1.0 * s, -0.18 * s);
   ctx.lineTo(0.1 * s, -0.34 * s);
   ctx.closePath();
-  // Tailplane.
+  fillSilhouette(ctx, color, alpha);
+
+  ctx.beginPath();
+  ctx.roundRect(-0.11 * s, -0.85 * s, 0.22 * s, 1.7 * s, 0.11 * s);
+  fillSilhouette(ctx, color, alpha);
+
+  ctx.beginPath();
   ctx.moveTo(-0.09 * s, 0.6 * s);
   ctx.lineTo(-0.42 * s, 0.78 * s);
   ctx.lineTo(-0.42 * s, 0.88 * s);
@@ -210,24 +231,33 @@ function lightBody(ctx: CanvasRenderingContext2D, s: number): void {
   ctx.lineTo(0.42 * s, 0.78 * s);
   ctx.lineTo(0.09 * s, 0.6 * s);
   ctx.closePath();
+  fillSilhouette(ctx, color, alpha);
 }
 
-/** Helicopter: teardrop cabin + tail boom + tail-rotor pylon. */
-function heliBody(ctx: CanvasRenderingContext2D, s: number): void {
+function fillHeliSilhouette(
+  ctx: CanvasRenderingContext2D,
+  s: number,
+  color: RGB,
+  alpha: number,
+): void {
   ctx.beginPath();
-  // Cabin (rounded, nose up).
   ctx.ellipse(0, -0.15 * s, 0.34 * s, 0.55 * s, 0, 0, Math.PI * 2);
-  // Tail boom.
+  fillSilhouette(ctx, color, alpha);
+
+  ctx.beginPath();
   ctx.moveTo(-0.07 * s, 0.3 * s);
   ctx.lineTo(-0.05 * s, 1.12 * s);
   ctx.lineTo(0.05 * s, 1.12 * s);
   ctx.lineTo(0.07 * s, 0.3 * s);
   ctx.closePath();
-  // Tail fin.
+  fillSilhouette(ctx, color, alpha);
+
+  ctx.beginPath();
   ctx.moveTo(-0.05 * s, 1.0 * s);
   ctx.lineTo(-0.22 * s, 1.22 * s);
   ctx.lineTo(-0.05 * s, 1.22 * s);
   ctx.closePath();
+  fillSilhouette(ctx, color, alpha);
 }
 
 /** A spinning propeller / small rotor disc. */

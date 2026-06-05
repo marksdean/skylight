@@ -23,7 +23,7 @@ import {
   type Meters,
   type Point,
 } from "@shared/index.js";
-import { AIRPORTS } from "./airports.js";
+import { getAirport } from "@shared/airport-resolve.js";
 import { classifyGlyph, drawAircraftGlyph, GLYPH_SCALE } from "./aircraftGlyph.js";
 import { computeSky, type Sky, type Tle } from "./celestial.js";
 import { ASTERISMS } from "./stars.js";
@@ -408,63 +408,64 @@ export class Renderer {
 
   // --- airport: runways at true geographic position ---
   private drawAirport(cfg: Config, proj: ProjOpts): void {
+    const ap = getAirport(cfg.airportIcao);
+    if (!ap) return;
+
     const ctx = this.ctx;
     const rwyRgb: [number, number, number] = [150, 180, 220];
-    for (const ap of AIRPORTS) {
-      let cx = 0;
-      let cy = 0;
-      let n = 0;
-      for (const r of ap.runways) {
-        const a = this.toScreen(r.le, cfg, proj);
-        const b = this.toScreen(r.he, cfg, proj);
-        // True runway width in px, nudged up a touch so it stays legible.
-        const wpx = Math.max(2.5, r.widthFt * 0.3048 * proj.pxPerM * 1.4);
+    let cx = 0;
+    let cy = 0;
+    let n = 0;
+    for (const r of ap.runways) {
+      const a = this.toScreen(r.le, cfg, proj);
+      const b = this.toScreen(r.he, cfg, proj);
+      // True runway width in px, nudged up a touch so it stays legible.
+      const wpx = Math.max(2.5, r.widthFt * 0.3048 * proj.pxPerM * 1.4);
 
-        ctx.save();
-        ctx.lineCap = "butt";
-        // Asphalt body.
-        ctx.strokeStyle = rgba(rwyRgb, 0.16 * cfg.brightness);
-        ctx.lineWidth = wpx;
-        ctx.beginPath();
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
-        ctx.stroke();
-        // Dashed centerline.
-        ctx.strokeStyle = rgba([210, 226, 255], 0.22 * cfg.brightness);
-        ctx.lineWidth = 1;
-        ctx.setLineDash([6, 6]);
-        ctx.beginPath();
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
-        ctx.stroke();
-        ctx.restore();
+      ctx.save();
+      ctx.lineCap = "butt";
+      // Asphalt body.
+      ctx.strokeStyle = rgba(rwyRgb, 0.16 * cfg.brightness);
+      ctx.lineWidth = wpx;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+      // Dashed centerline.
+      ctx.strokeStyle = rgba([210, 226, 255], 0.22 * cfg.brightness);
+      ctx.lineWidth = 1;
+      ctx.setLineDash([6, 6]);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+      ctx.restore();
 
-        cx += (a.x + b.x) / 2;
-        cy += (a.y + b.y) / 2;
-        n++;
+      cx += (a.x + b.x) / 2;
+      cy += (a.y + b.y) / 2;
+      n++;
+    }
+    // Airport label at the runway centroid.
+    if (n) {
+      cx /= n;
+      cy /= n;
+      ctx.save();
+      ctx.font = `300 13px ${cfg.fonts.label}`;
+      ctx.fillStyle = rgba(rwyRgb, 0.5 * cfg.brightness);
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      try {
+        ctx.letterSpacing = "4px";
+      } catch {
+        /* noop */
       }
-      // Airport label at the runway centroid.
-      if (n) {
-        cx /= n;
-        cy /= n;
-        ctx.save();
-        ctx.font = `300 13px ${cfg.fonts.label}`;
-        ctx.fillStyle = rgba(rwyRgb, 0.5 * cfg.brightness);
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        try {
-          ctx.letterSpacing = "4px";
-        } catch {
-          /* noop */
-        }
-        ctx.fillText(ap.name, cx, cy);
-        try {
-          ctx.letterSpacing = "0px";
-        } catch {
-          /* noop */
-        }
-        ctx.restore();
+      ctx.fillText(ap.iata, cx, cy);
+      try {
+        ctx.letterSpacing = "0px";
+      } catch {
+        /* noop */
       }
+      ctx.restore();
     }
   }
 
