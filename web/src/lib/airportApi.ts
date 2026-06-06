@@ -1,10 +1,43 @@
 import {
   airportConfigPatch,
   getAirport,
+  nearestAirportIcao,
   registerAirport,
   type AirportCatalogEntry,
   type NearbyAirportSummary,
 } from "@shared/airport-resolve.js";
+import type { Config } from "@shared/index.js";
+
+export type GeolocationResult =
+  | { ok: true; lat: number; lon: number }
+  | { ok: false; error: string };
+
+const GEO_OPTS: PositionOptions = {
+  enableHighAccuracy: true,
+  timeout: 15000,
+  maximumAge: 60000,
+};
+
+export function getCurrentPosition(): Promise<GeolocationResult> {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) {
+      resolve({ ok: false, error: "Geolocation is not available in this browser." });
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ ok: true, lat: pos.coords.latitude, lon: pos.coords.longitude }),
+      (err) =>
+        resolve({
+          ok: false,
+          error:
+            err.code === err.PERMISSION_DENIED
+              ? "Location permission denied."
+              : "Could not determine your location.",
+        }),
+      GEO_OPTS,
+    );
+  });
+}
 
 export async function fetchNearbyAirports(
   lat: number,
@@ -36,11 +69,33 @@ export async function ensureAirport(icao: string): Promise<AirportCatalogEntry> 
   return fetchAirport(icao);
 }
 
-export async function selectAirport(icao: string): Promise<{
-  airportIcao: string;
-  centerLat: number;
-  centerLon: number;
-}> {
+export async function selectAirport(icao: string): Promise<
+  Pick<Config, "airportIcao" | "centerLat" | "centerLon" | "locationMode" | "showAirport">
+> {
   await ensureAirport(icao);
-  return airportConfigPatch(icao);
+  return { ...airportConfigPatch(icao), locationMode: "airport", showAirport: true };
+}
+
+/** Center the overhead view on a GPS position instead of an airport field. */
+export async function selectPosition(
+  lat: number,
+  lon: number,
+): Promise<Pick<Config, "airportIcao" | "centerLat" | "centerLon" | "locationMode" | "showAirport">> {
+  let airportIcao = nearestAirportIcao(lat, lon);
+  try {
+    const hits = await fetchNearbyAirports(lat, lon, 1);
+    if (hits[0]) {
+      await ensureAirport(hits[0].icao);
+      airportIcao = hits[0].icao;
+    }
+  } catch {
+    /* fall back to bundled nearest */
+  }
+  return {
+    locationMode: "position",
+    centerLat: Math.round(lat * 1e6) / 1e6,
+    centerLon: Math.round(lon * 1e6) / 1e6,
+    airportIcao,
+    showAirport: false,
+  };
 }

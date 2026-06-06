@@ -12,6 +12,8 @@ export type DataSource = "radio" | "api";
 export interface Palette {
   bg: string;
   glyph: string;
+  /** Aircraft on the ground (taxi / ramp). */
+  ground: string;
   trail: string;
   accent: string;
   warn: string;
@@ -37,12 +39,19 @@ export interface ShowFields {
   registration: boolean;
 }
 
+export type LocationMode = "airport" | "position";
+
 export interface Config {
   // --- location & scope ---
-  /** ICAO code for the home airport (runways + default map center). */
+  /** Airport for runway overlay; nearest field when locationMode is "position". */
   airportIcao: string;
+  /** Map center — airport field or your GPS position. */
   centerLat: number;
   centerLon: number;
+  /** When "position", centerLat/Lon are the observer (not an airport field). */
+  locationMode: LocationMode;
+  /** Play a jet pass sound when traffic crosses overhead (position mode only). */
+  overheadAlert: boolean;
   radiusMiles: number;
 
   // --- calibration (tune against a real overhead pass) ---
@@ -124,6 +133,8 @@ export const DEFAULT_CONFIG: Config = {
   airportIcao: defaultAirport.airportIcao,
   centerLat: defaultAirport.centerLat,
   centerLon: defaultAirport.centerLon,
+  locationMode: "airport",
+  overheadAlert: false,
   radiusMiles: 3,
 
   rotationDeg: 0,
@@ -145,6 +156,7 @@ export const DEFAULT_CONFIG: Config = {
   palette: {
     bg: "#000000",
     glyph: "#E8ECFF",
+    ground: "#9AB88C",
     trail: "#6B7280",
     accent: "#9B7ECF",
     warn: "#FF5A47",

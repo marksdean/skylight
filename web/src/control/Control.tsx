@@ -6,8 +6,15 @@ import {
   listAirportGroups,
   type NearbyAirportSummary,
 } from "@shared/airport-resolve.js";
-import { fetchNearbyAirports, selectAirport } from "../lib/airportApi.js";
+import {
+  fetchNearbyAirports,
+  getCurrentPosition,
+  selectAirport,
+  selectPosition,
+} from "../lib/airportApi.js";
 import { useAirportLoader } from "../lib/useAirportLoader.js";
+import { unlockOverheadAudio, playOverheadPass } from "../lib/overheadSound.js";
+import { useOverheadAlert } from "../lib/useOverheadAlert.js";
 import { useStream } from "../lib/useStream.js";
 import { nextISSPass, type Tle } from "../display/celestial.js";
 import { ColorRow, Row, Section, Segmented, Select, Slider, Toggle } from "./components.js";
@@ -58,8 +65,10 @@ export function Control() {
 
   const [nearby, setNearby] = useState<NearbyAirportSummary[]>([]);
   const [nearbyLoading, setNearbyLoading] = useState(false);
+  const [positionLoading, setPositionLoading] = useState(false);
   const [nearbyError, setNearbyError] = useState<string | null>(null);
   useAirportLoader(cfg?.airportIcao);
+  useOverheadAlert(cfg ?? undefined, state.aircraft);
 
   const staticIcaos = useMemo(
     () => new Set(listAirportGroups().flatMap((g) => g.icaos)),
@@ -79,34 +88,44 @@ export function Control() {
   }
 
   function findAirportsNearMe(): void {
-    if (!navigator.geolocation) {
-      setNearbyError("Geolocation is not available in this browser.");
-      return;
-    }
     setNearbyLoading(true);
     setNearbyError(null);
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        try {
-          const hits = await fetchNearbyAirports(pos.coords.latitude, pos.coords.longitude);
-          setNearby(hits);
-          if (!hits.length) setNearbyError("No scheduled airports with runways found within 120 mi.");
-        } catch {
-          setNearbyError("Could not search for nearby airports.");
-        } finally {
-          setNearbyLoading(false);
-        }
-      },
-      (err) => {
+    void getCurrentPosition().then(async (pos) => {
+      if (!pos.ok) {
+        setNearbyError(pos.error);
         setNearbyLoading(false);
-        setNearbyError(
-          err.code === err.PERMISSION_DENIED
-            ? "Location permission denied."
-            : "Could not determine your location.",
-        );
-      },
-      { enableHighAccuracy: false, timeout: 15000, maximumAge: 60000 },
-    );
+        return;
+      }
+      try {
+        const hits = await fetchNearbyAirports(pos.lat, pos.lon);
+        setNearby(hits);
+        if (!hits.length) setNearbyError("No scheduled airports with runways found within 120 mi.");
+      } catch {
+        setNearbyError("Could not search for nearby airports.");
+      } finally {
+        setNearbyLoading(false);
+      }
+    });
+  }
+
+  function useMyPosition(): void {
+    setPositionLoading(true);
+    setNearbyError(null);
+    void getCurrentPosition().then(async (pos) => {
+      if (!pos.ok) {
+        setNearbyError(pos.error);
+        setPositionLoading(false);
+        return;
+      }
+      try {
+        const patch = await selectPosition(pos.lat, pos.lon);
+        conn.patchConfig(patch);
+      } catch {
+        setNearbyError("Could not update location.");
+      } finally {
+        setPositionLoading(false);
+      }
+    });
   }
 
   if (!cfg) {
@@ -136,11 +155,20 @@ export function Control() {
 
       <main>
         <Section title="Location">
-          <Row label="Airport" hint="runways + map center">
+          <Row label="Center" hint="airport field or your GPS position">
             <Select
-              value={cfg.airportIcao}
-              onChange={(icao) => void pickAirport(icao)}
+              value={cfg.locationMode === "position" ? "__position__" : cfg.airportIcao}
+              onChange={(v) => {
+                if (v !== "__position__") void pickAirport(v);
+              }}
             >
+              {cfg.locationMode === "position" && (
+                <optgroup label="Observer">
+                  <option value="__position__">
+                    My position ({cfg.centerLat.toFixed(4)}°, {cfg.centerLon.toFixed(4)}°)
+                  </option>
+                </optgroup>
+              )}
               {nearby.length > 0 && (
                 <optgroup label="Near you">
                   {nearby.map((ap) => (
@@ -169,6 +197,14 @@ export function Control() {
           <div className="chips">
             <button
               type="button"
+              className={`chip ${cfg.locationMode === "position" ? "on" : ""} ${positionLoading ? "on" : ""}`}
+              disabled={positionLoading}
+              onClick={useMyPosition}
+            >
+              {positionLoading ? "Locating…" : "Use my position"}
+            </button>
+            <button
+              type="button"
               className={`chip ${nearbyLoading ? "on" : ""}`}
               disabled={nearbyLoading}
               onClick={findAirportsNearMe}
@@ -176,6 +212,36 @@ export function Control() {
               {nearbyLoading ? "Locating…" : "Airports near me"}
             </button>
           </div>
+          {cfg.locationMode === "position" && (
+            <>
+              <Row label="Overhead alert" hint="jet sound when a plane passes above you">
+                <Toggle
+                  value={cfg.overheadAlert}
+                  onChange={(v) => {
+                    if (v) unlockOverheadAudio();
+                    set({ overheadAlert: v });
+                  }}
+                />
+              </Row>
+              {cfg.overheadAlert && (
+                <div className="chips">
+                  <button
+                    type="button"
+                    className="chip"
+                    onClick={() => {
+                      unlockOverheadAudio();
+                      playOverheadPass();
+                    }}
+                  >
+                    Test alert sound
+                  </button>
+                </div>
+              )}
+              <div className="hint">
+                Overhead traffic is centered on your GPS position. Pick an airport to switch back.
+              </div>
+            </>
+          )}
           {nearbyError && <div className="hint error">{nearbyError}</div>}
           {nearby.length > 0 && (
             <div className="chips">
@@ -387,6 +453,8 @@ export function Control() {
               onChange={(v) => set({ palette: { ...cfg.palette, bg: v } })} />
             <ColorRow label="Glyph" value={cfg.palette.glyph}
               onChange={(v) => set({ palette: { ...cfg.palette, glyph: v } })} />
+            <ColorRow label="Ground" value={cfg.palette.ground}
+              onChange={(v) => set({ palette: { ...cfg.palette, ground: v } })} />
             <ColorRow label="Trail" value={cfg.palette.trail}
               onChange={(v) => set({ palette: { ...cfg.palette, trail: v } })} />
             <ColorRow label="Accent" value={cfg.palette.accent}

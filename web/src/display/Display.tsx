@@ -3,6 +3,8 @@ import type { Config, Theme } from "@shared/index.js";
 import { DEFAULT_CONFIG } from "@shared/index.js";
 import { useStream } from "../lib/useStream.js";
 import { useAirportLoader } from "../lib/useAirportLoader.js";
+import { unlockOverheadAudio } from "../lib/overheadSound.js";
+import { useOverheadAlert } from "../lib/useOverheadAlert.js";
 import { Renderer } from "./renderer.js";
 
 const THEMES: Theme[] = ["ambient", "telemetry", "focus"];
@@ -16,6 +18,15 @@ export function Display() {
   const configRef = useRef<Config>(state.config ?? DEFAULT_CONFIG);
   configRef.current = state.config ?? DEFAULT_CONFIG;
   useAirportLoader(state.config?.airportIcao);
+  useOverheadAlert(state.config ?? undefined, state.aircraft);
+
+  // Unlock audio on first interaction (browser autoplay policy).
+  useEffect(() => {
+    if (!state.config?.overheadAlert) return;
+    const unlock = () => unlockOverheadAudio();
+    window.addEventListener("pointerdown", unlock, { once: true });
+    return () => window.removeEventListener("pointerdown", unlock);
+  }, [state.config?.overheadAlert]);
 
   // Create renderer once.
   useEffect(() => {

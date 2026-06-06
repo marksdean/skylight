@@ -28,9 +28,9 @@ import { carrierIata } from "@shared/carriers.js";
 import {
   carrierBadge,
   carrierHue,
-  classifyGlyph,
   drawAircraftGlyph,
   GLYPH_SCALE,
+  resolveSilhouette,
 } from "./aircraftGlyph.js";
 import { carrierLogos } from "../lib/carrierLogos.js";
 import { computeSky, type Sky, type Tle } from "./celestial.js";
@@ -299,7 +299,11 @@ export class Renderer {
       const edgeFade = clamp01((cfg.radiusMiles - rangeMi) / (cfg.radiusMiles * 0.14));
       const alpha = clamp01(edgeFade) * tr.life * cfg.brightness;
       const alt = tr.ac.altBaro ?? tr.ac.altGeom ?? 0;
-      const color = cfg.altitudeColor ? altRamp(alt) : hexToRgb(cfg.palette.glyph);
+      const color = tr.ac.onGround
+        ? hexToRgb(cfg.palette.ground)
+        : cfg.altitudeColor
+          ? altRamp(alt)
+          : hexToRgb(cfg.palette.glyph);
       const emergency = cfg.highlightEmergency && !!tr.ac.squawk && EMERGENCY_SQUAWKS.has(tr.ac.squawk);
 
       visible.push({ tr, m, p, heading, rangeMi, alpha, color, emergency });
@@ -416,6 +420,7 @@ export class Renderer {
 
   // --- airport: runways at true geographic position ---
   private drawAirport(cfg: Config, proj: ProjOpts): void {
+    if (cfg.locationMode === "position") return;
     const ap = getAirport(cfg.airportIcao);
     if (!ap) return;
 
@@ -706,11 +711,12 @@ export class Renderer {
     ctx.save();
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
+    const trailRgb = v.emergency ? hexToRgb(cfg.palette.warn) : hexToRgb(cfg.palette.trail);
     for (let i = 1; i < pts.length; i++) {
       const a = pts[i - 1];
       const b = pts[i];
       const f = 1 - b.age; // 1 at head, 0 at tail
-      ctx.strokeStyle = rgba(v.color, 0.55 * f * v.alpha);
+      ctx.strokeStyle = rgba(trailRgb, 0.55 * f * v.alpha);
       ctx.lineWidth = 0.7 + 2.2 * f * (cfg.glyphSizePx / 14);
       ctx.beginPath();
       ctx.moveTo(a.p.x, a.p.y);
@@ -724,8 +730,8 @@ export class Renderer {
   private drawGlyph(cfg: Config, v: Visible): void {
     const ctx = this.ctx;
     const color = v.emergency ? hexToRgb(cfg.palette.warn) : v.color;
-    const kind = classifyGlyph(v.tr.ac);
-    const s = cfg.glyphSizePx * GLYPH_SCALE[kind];
+    const silhouette = resolveSilhouette(v.tr.ac);
+    const s = cfg.glyphSizePx * GLYPH_SCALE[silhouette];
 
     ctx.save();
     ctx.translate(v.p.x, v.p.y);
@@ -740,7 +746,7 @@ export class Renderer {
     ctx.arc(0, 0, s * 1.7, 0, Math.PI * 2);
     ctx.fill();
 
-    drawAircraftGlyph(ctx, kind, s, color, v.alpha, this.frameT, hexSeed(v.tr.ac.hex));
+    drawAircraftGlyph(ctx, silhouette, s, color, v.alpha, this.frameT, hexSeed(v.tr.ac.hex));
     ctx.restore();
 
     if (cfg.showCarrierBadge && cfg.glyphSizePx >= 10) {
