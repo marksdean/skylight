@@ -4,6 +4,8 @@ import {
   nearestAirportIcao,
   registerAirport,
   type AirportCatalogEntry,
+  type ActiveAirportsResponse,
+  type AirportSearchResult,
   type NearbyAirportSummary,
 } from "@shared/airport-resolve.js";
 import type { Config } from "@shared/index.js";
@@ -37,6 +39,46 @@ export function getCurrentPosition(): Promise<GeolocationResult> {
       GEO_OPTS,
     );
   });
+}
+
+export interface WeatherSnapshot {
+  tempC: number;
+  windKph: number;
+  cloudPct: number;
+  code: number;
+  isDay: boolean;
+  label: string;
+  lat: number;
+  lon: number;
+  updatedAt: number;
+}
+
+export async function fetchWeather(): Promise<WeatherSnapshot | null> {
+  try {
+    const res = await fetch("/api/weather");
+    if (!res.ok) return null;
+    return (await res.json()) as WeatherSnapshot;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchActiveAirports(
+  limit = 12,
+  refresh = false,
+): Promise<ActiveAirportsResponse> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (refresh) params.set("refresh", "1");
+  const res = await fetch(`/api/airports/active?${params}`);
+  if (!res.ok) throw new Error(`Active airports failed (${res.status})`);
+  return res.json() as Promise<ActiveAirportsResponse>;
+}
+
+export async function fetchSearchAirports(q: string, limit = 15): Promise<AirportSearchResult[]> {
+  const params = new URLSearchParams({ q, limit: String(limit) });
+  const res = await fetch(`/api/airports/search?${params}`);
+  if (!res.ok) throw new Error(`Airport search failed (${res.status})`);
+  return res.json() as Promise<AirportSearchResult[]>;
 }
 
 export async function fetchNearbyAirports(

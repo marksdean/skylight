@@ -18,6 +18,9 @@ import {
   rangeMeters,
   metersToMiles,
   EMERGENCY_SQUAWKS,
+  isRareAircraft,
+  activeMeteorShowers,
+  daysFromPeak,
   type Aircraft,
   type Config,
   type Meters,
@@ -32,8 +35,11 @@ import {
   GLYPH_SCALE,
   resolveSilhouette,
 } from "./aircraftGlyph.js";
+import tzlookup from "tz-lookup";
 import { carrierLogos } from "../lib/carrierLogos.js";
-import { computeSky, type Sky, type Tle } from "./celestial.js";
+import { airportPhotos } from "../lib/airportPhotos.js";
+import type { WeatherSnapshot } from "../lib/airportApi.js";
+import { computeSky, equatorialToHorizontal, type Sky, type Tle } from "./celestial.js";
 import { ASTERISMS } from "./stars.js";
 
 /** How far in the past we render, ms. Just over the ~1 Hz fix interval. */
@@ -97,6 +103,7 @@ interface Visible {
   alpha: number;
   color: [number, number, number];
   emergency: boolean;
+  rare: boolean;
 }
 
 export class Renderer {
@@ -118,6 +125,11 @@ export class Renderer {
   private sky: Sky = { stars: [], sats: [] };
   private skyComputedAt = 0;
   private skyOffsetUsed = NaN;
+  private plaqueIcao = "";
+  private weather: WeatherSnapshot | null = null;
+  private tickerOffset = 0;
+  /** Cached auto-fit radius (miles) per airport, so we don't remeasure each frame. */
+  private zoomCache: { icao: string; radius: number } | null = null;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -240,8 +252,32 @@ export class Renderer {
     return lastS.m;
   }
 
+  /** Smallest field radius (miles) that frames every runway with a margin. */
+  private autoZoomRadius(cfg: Config): number {
+    // Tour mode always frames each airport; the manual toggle covers static views.
+    const wantZoom = cfg.autoZoomAirport || cfg.airportTour;
+    if (!wantZoom || cfg.locationMode !== "airport") return cfg.radiusMiles;
+    const ap = getAirport(cfg.airportIcao);
+    if (!ap?.runways.length) return cfg.radiusMiles;
+    if (this.zoomCache?.icao === ap.icao) return this.zoomCache.radius;
+
+    let maxMeters = 0;
+    for (const r of ap.runways) {
+      for (const [lat, lon] of [r.le, r.he]) {
+        const m = llToMeters(lat, lon, cfg.centerLat, cfg.centerLon);
+        maxMeters = Math.max(maxMeters, rangeMeters(m));
+      }
+    }
+    // 12% breathing room so runway-end labels aren't clipped; floor for tiny fields.
+    const radius = Math.max(0.5, metersToMiles(maxMeters) * 1.12);
+    this.zoomCache = { icao: ap.icao, radius };
+    return radius;
+  }
+
   private draw(): void {
-    const cfg = this.getConfig();
+    const base = this.getConfig();
+    const fitRadius = this.autoZoomRadius(base);
+    const cfg: Config = fitRadius === base.radiusMiles ? base : { ...base, radiusMiles: fitRadius };
     const ctx = this.ctx;
     const now = performance.now();
     const frameDt = this.prevFrame ? (now - this.prevFrame) / 1000 : 0.016;
@@ -266,7 +302,9 @@ export class Renderer {
     };
 
     this.updateSky(cfg, now);
+    this.drawTint(cfg);
     this.drawSky(cfg, proj);
+    if (cfg.showMeteorShowers) this.drawMeteorShowers(cfg, proj);
     this.drawOverlays(cfg, proj);
     if (cfg.showAirport) this.drawAirport(cfg, proj);
 
@@ -305,8 +343,9 @@ export class Renderer {
           ? altRamp(alt)
           : hexToRgb(cfg.palette.glyph);
       const emergency = cfg.highlightEmergency && !!tr.ac.squawk && EMERGENCY_SQUAWKS.has(tr.ac.squawk);
+      const rare = cfg.highlightRare && isRareAircraft(tr.ac);
 
-      visible.push({ tr, m, p, heading, rangeMi, alpha, color, emergency });
+      visible.push({ tr, m, p, heading, rangeMi, alpha, color, emergency, rare });
     }
 
     // Nearest last so it paints on top.
@@ -322,6 +361,165 @@ export class Renderer {
     this.drawLabels(cfg, byNear);
 
     if (cfg.theme === "focus" && byNear.length) this.drawDetailPanel(cfg, byNear[0]);
+    if (cfg.showAirport) this.drawAirportPlaque(cfg);
+    if (cfg.showWeather) this.drawWeather(cfg);
+    if (cfg.showDestTicker) this.drawDestTicker(cfg, byNear, frameDt);
+  }
+
+  /** Display feeds live weather here (fetched over REST). */
+  setWeather(w: WeatherSnapshot | null): void {
+    this.weather = w;
+  }
+
+  /** Subtle background wash driven by the real sun altitude. Opt-in: pure black
+   *  stays the default so projector blacks remain deep. */
+  private drawTint(cfg: Config): void {
+    if (!cfg.dayNightTint) return;
+    const alt = this.sky.sun?.alt;
+    if (alt == null) return;
+
+    // Map sun altitude to a soft sky color + strength.
+    let rgb: [number, number, number];
+    let strength: number;
+    if (alt > 6) {
+      rgb = [40, 78, 140]; // daylight blue
+      strength = 0.16;
+    } else if (alt > -0.5) {
+      rgb = [210, 120, 70]; // sunrise/sunset gold
+      strength = 0.18;
+    } else if (alt > -6) {
+      rgb = [120, 80, 120]; // civil twilight
+      strength = 0.14;
+    } else if (alt > -12) {
+      rgb = [50, 50, 100]; // nautical twilight
+      strength = 0.1;
+    } else if (alt > -18) {
+      rgb = [24, 28, 60]; // astronomical twilight
+      strength = 0.06;
+    } else {
+      return; // true night — leave it black
+    }
+
+    const ctx = this.ctx;
+    // Cloud cover deepens / greys the wash a touch when weather is shown.
+    const cloud = cfg.showWeather && this.weather ? this.weather.cloudPct / 100 : 0;
+    const a = strength * cfg.brightness * (1 - cloud * 0.4);
+    const g = ctx.createRadialGradient(
+      this.w / 2,
+      this.h / 2,
+      0,
+      this.w / 2,
+      this.h / 2,
+      Math.max(this.w, this.h) * 0.7,
+    );
+    g.addColorStop(0, rgba(rgb, a));
+    g.addColorStop(1, rgba(rgb, a * 0.25));
+    ctx.save();
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, this.w, this.h);
+    ctx.restore();
+  }
+
+  /** Active meteor-shower radiants placed on the sky field. */
+  private drawMeteorShowers(cfg: Config, proj: ProjOpts): void {
+    const showers = activeMeteorShowers();
+    if (!showers.length) return;
+    const date = new Date(Date.now() + cfg.skyTimeOffsetMin * 60000);
+    const ctx = this.ctx;
+
+    for (const s of showers) {
+      const { az, alt } = equatorialToHorizontal(s.ra, s.dec, date, cfg.centerLat, cfg.centerLon);
+      if (alt < 0) continue; // radiant below horizon
+      const p = this.projectSky(az, alt, cfg, proj);
+      const near = Math.abs(daysFromPeak(s)) <= 1;
+      const baseA = (near ? 0.85 : 0.5) * cfg.brightness;
+      const rgb: [number, number, number] = [180, 210, 255];
+
+      // A few faint streaks radiating outward (animated shimmer by frame time).
+      ctx.save();
+      const streaks = near ? 6 : 4;
+      for (let i = 0; i < streaks; i++) {
+        const ang = (i / streaks) * Math.PI * 2 + this.frameT * 0.15;
+        const len = 10 + ((i * 7 + Math.floor(this.frameT * 2)) % 14);
+        ctx.strokeStyle = rgba(rgb, 0.12 * baseA);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(p.x + Math.cos(ang) * len, p.y + Math.sin(ang) * len);
+        ctx.stroke();
+      }
+      // Radiant core.
+      ctx.fillStyle = rgba(rgb, 0.5 * baseA);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, near ? 2.6 : 1.8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      const label = near ? `${s.name} ✦ peak` : s.name;
+      this.skyLabel(p, label, cfg, 0.7 * baseA, "#B4D2FF");
+    }
+  }
+
+  /** Slow marquee of where overhead planes are headed. */
+  private drawDestTicker(cfg: Config, nearestFirst: Visible[], frameDt: number): void {
+    const seen = new Set<string>();
+    const items: string[] = [];
+    for (const v of nearestFirst) {
+      const ac = v.tr.ac;
+      if (!ac.destination || !routePlausible(ac, cfg)) continue;
+      const key = ac.destination;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const city = ac.destName ?? "";
+      const local = ac.destLat != null && ac.destLon != null ? localTime(ac.destLat, ac.destLon) : "";
+      const bits = [ac.destination, city, local ? `${local} local` : ""].filter(Boolean);
+      items.push(bits.join(" "));
+    }
+    if (!items.length) {
+      this.tickerOffset = 0;
+      return;
+    }
+
+    const ctx = this.ctx;
+    const text = items.join("      ·      ") + "      ·      ";
+    const y = this.h - 16;
+    ctx.save();
+    ctx.font = `300 13px ${cfg.fonts.label}`;
+    try {
+      ctx.letterSpacing = "1px";
+    } catch {
+      /* noop */
+    }
+    const unit = ctx.measureText(text).width;
+    this.tickerOffset = (this.tickerOffset + frameDt * 38) % unit;
+    ctx.fillStyle = rgba(hexToRgb(cfg.palette.text), 0.55 * cfg.brightness);
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+    // Repeat to fill the width seamlessly.
+    for (let x = -this.tickerOffset; x < this.w; x += unit) {
+      ctx.fillText(text, x, y);
+    }
+    try {
+      ctx.letterSpacing = "0px";
+    } catch {
+      /* noop */
+    }
+    ctx.restore();
+  }
+
+  /** Small live weather readout, tucked top-left under the HUD area. */
+  private drawWeather(cfg: Config): void {
+    const w = this.weather;
+    if (!w) return;
+    const ctx = this.ctx;
+    const text = `${w.tempC}°C · ${w.label} · ${w.cloudPct}% cloud · ${w.windKph} km/h`;
+    ctx.save();
+    ctx.font = `300 12px ${cfg.fonts.label}`;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    ctx.fillStyle = rgba(hexToRgb(cfg.palette.text), 0.5 * cfg.brightness);
+    ctx.fillText(text, 16, cfg.showHud ? 40 : 14);
+    ctx.restore();
   }
 
   /**
@@ -426,9 +624,6 @@ export class Renderer {
 
     const ctx = this.ctx;
     const rwyRgb: [number, number, number] = [150, 180, 220];
-    let cx = 0;
-    let cy = 0;
-    let n = 0;
     for (const r of ap.runways) {
       const a = this.toScreen(r.le, cfg, proj);
       const b = this.toScreen(r.he, cfg, proj);
@@ -453,33 +648,190 @@ export class Renderer {
       ctx.lineTo(b.x, b.y);
       ctx.stroke();
       ctx.restore();
+    }
+  }
 
-      cx += (a.x + b.x) / 2;
-      cy += (a.y + b.y) / 2;
-      n++;
+  /** Fixed corner plaque — top-right, away from focus detail panel and traffic labels. */
+  private airportPlaqueLayout(cfg: Config): {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    photoSize: number;
+    gap: number;
+    innerPad: number;
+    textW: number;
+  } | null {
+    if (!cfg.showAirport || cfg.locationMode === "position") return null;
+    if (!getAirport(cfg.airportIcao)) return null;
+
+    const margin = 16;
+    const photoSize = 48;
+    const gap = 10;
+    const innerPad = 10;
+    const textW = Math.min(220, this.w * 0.28);
+    const plaqueW = innerPad + photoSize + gap + textW + innerPad;
+    const plaqueH = innerPad * 2 + photoSize;
+    return {
+      x: this.w - margin - plaqueW,
+      y: margin,
+      w: plaqueW,
+      h: plaqueH,
+      photoSize,
+      gap,
+      innerPad,
+      textW,
+    };
+  }
+
+  private drawAirportPlaque(cfg: Config): void {
+    if (cfg.locationMode === "position") return;
+    const ap = getAirport(cfg.airportIcao);
+    const layout = this.airportPlaqueLayout(cfg);
+    if (!ap || !layout) return;
+    if (this.plaqueIcao !== ap.icao) {
+      airportPhotos.forgetExcept(ap.icao);
+      this.plaqueIcao = ap.icao;
     }
-    // Airport label at the runway centroid.
-    if (n) {
-      cx /= n;
-      cy /= n;
+
+    const ctx = this.ctx;
+    const accent: [number, number, number] = [150, 180, 220];
+    const textRgb = hexToRgb(cfg.palette.text);
+    const { x, y, w: plaqueW, h: plaqueH, photoSize, gap, innerPad, textW } = layout;
+
+    const code = ap.iata || ap.icao.replace(/^[A-Z]/, "");
+    ctx.save();
+    ctx.globalAlpha = cfg.brightness;
+
+    // Panel backdrop.
+    ctx.fillStyle = rgba([8, 10, 14], 0.82);
+    ctx.strokeStyle = rgba(accent, 0.34);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(x, y, plaqueW, plaqueH, 12);
+    ctx.fill();
+    ctx.stroke();
+
+    const photoX = x + innerPad;
+    const photoY = y + innerPad;
+    const photo = airportPhotos.request(ap.icao);
+    if (photo) {
       ctx.save();
-      ctx.font = `300 13px ${cfg.fonts.label}`;
-      ctx.fillStyle = rgba(rwyRgb, 0.5 * cfg.brightness);
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      try {
-        ctx.letterSpacing = "4px";
-      } catch {
-        /* noop */
-      }
-      ctx.fillText(ap.iata, cx, cy);
-      try {
-        ctx.letterSpacing = "0px";
-      } catch {
-        /* noop */
-      }
+      ctx.fillStyle = rgba([255, 255, 255], 0.96);
+      ctx.beginPath();
+      ctx.roundRect(photoX, photoY, photoSize, photoSize, 8);
+      ctx.fill();
+      const pad = Math.max(2, photoSize * 0.08);
+      ctx.beginPath();
+      ctx.roundRect(photoX + pad, photoY + pad, photoSize - pad * 2, photoSize - pad * 2, 6);
+      ctx.clip();
+      ctx.drawImage(photo, photoX + pad, photoY + pad, photoSize - pad * 2, photoSize - pad * 2);
       ctx.restore();
+      ctx.strokeStyle = rgba(accent, 0.22);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(photoX, photoY, photoSize, photoSize, 8);
+      ctx.stroke();
+    } else {
+      this.drawAirportPhotoFallback(cfg, photoX, photoY, photoSize, accent);
     }
+
+    const textX = photoX + photoSize + gap;
+    const textCenterY = y + plaqueH / 2;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.font = `600 22px ${cfg.fonts.label}`;
+    ctx.fillStyle = rgba(accent, 0.96);
+    try {
+      ctx.letterSpacing = "5px";
+    } catch {
+      /* noop */
+    }
+    ctx.fillText(code, textX, textCenterY - 10);
+    try {
+      ctx.letterSpacing = "0px";
+    } catch {
+      /* noop */
+    }
+
+    ctx.font = `300 12px ${cfg.fonts.label}`;
+    ctx.fillStyle = rgba(textRgb, 0.78);
+    const name = this.wrapPlaqueText(ap.name, textW, 2);
+    const nameLines = name.split("\n");
+    const lineH = 14;
+    const nameTop = textCenterY + 4;
+    for (let i = 0; i < nameLines.length; i++) {
+      ctx.fillText(nameLines[i], textX, nameTop + i * lineH + lineH / 2);
+    }
+
+    ctx.restore();
+  }
+
+  private drawAirportPhotoFallback(
+    cfg: Config,
+    x: number,
+    y: number,
+    size: number,
+    accent: [number, number, number],
+  ): void {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.fillStyle = rgba([18, 24, 34], 0.95);
+    ctx.strokeStyle = rgba(accent, 0.28);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(x, y, size, size, 8);
+    ctx.fill();
+    ctx.stroke();
+
+    const cx = x + size / 2;
+    const cy = y + size / 2;
+    const rwyLen = size * 0.34;
+    const rwyGap = size * 0.11;
+    ctx.lineCap = "butt";
+    for (const offset of [-rwyGap, rwyGap]) {
+      ctx.strokeStyle = rgba(accent, 0.42 * cfg.brightness);
+      ctx.lineWidth = Math.max(2, size * 0.055);
+      ctx.beginPath();
+      ctx.moveTo(cx - rwyLen, cy + offset);
+      ctx.lineTo(cx + rwyLen, cy + offset);
+      ctx.stroke();
+      ctx.strokeStyle = rgba([210, 226, 255], 0.24 * cfg.brightness);
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 4]);
+      ctx.beginPath();
+      ctx.moveTo(cx - rwyLen * 0.85, cy + offset);
+      ctx.lineTo(cx + rwyLen * 0.85, cy + offset);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.restore();
+  }
+
+  private wrapPlaqueText(text: string, maxWidth: number, maxLines: number): string {
+    const ctx = this.ctx;
+    const words = text.split(/\s+/);
+    const lines: string[] = [];
+    let line = "";
+    for (const word of words) {
+      const next = line ? `${line} ${word}` : word;
+      if (ctx.measureText(next).width <= maxWidth) {
+        line = next;
+        continue;
+      }
+      if (line) lines.push(line);
+      line = word;
+      if (lines.length >= maxLines) break;
+    }
+    if (line && lines.length < maxLines) lines.push(line);
+    if (lines.length === maxLines && words.length > 0) {
+      let last = lines[maxLines - 1];
+      while (last.length > 1 && ctx.measureText(`${last}…`).width > maxWidth) {
+        last = last.slice(0, -1);
+      }
+      lines[maxLines - 1] = `${last}…`;
+    }
+    return lines.join("\n");
   }
 
   private toScreen(ll: [number, number], cfg: Config, proj: ProjOpts): Point {
@@ -488,7 +840,9 @@ export class Renderer {
 
   // --- sky layer (sun / moon / stars / satellites) ---
   private updateSky(cfg: Config, now: number): void {
-    const want = cfg.showStars || cfg.showSun || cfg.showMoon || cfg.showSatellites;
+    // The day/night tint needs the sun even when the sun glyph is hidden.
+    const needSun = cfg.showSun || cfg.dayNightTint;
+    const want = cfg.showStars || needSun || cfg.showMoon || cfg.showSatellites;
     if (!want) {
       this.sky = { stars: [], sats: [] };
       return;
@@ -498,7 +852,7 @@ export class Renderer {
     this.skyOffsetUsed = cfg.skyTimeOffsetMin;
     const date = new Date(Date.now() + cfg.skyTimeOffsetMin * 60000);
     this.sky = computeSky(date, cfg.centerLat, cfg.centerLon, {
-      sun: cfg.showSun,
+      sun: needSun,
       moon: cfg.showMoon,
       stars: cfg.showStars,
       satellites: cfg.showSatellites,
@@ -746,7 +1100,21 @@ export class Renderer {
     ctx.arc(0, 0, s * 1.7, 0, Math.PI * 2);
     ctx.fill();
 
-    drawAircraftGlyph(ctx, silhouette, s, color, v.alpha, this.frameT, hexSeed(v.tr.ac.hex));
+    // Rare / iconic aircraft get a warm pulsing ring so they stand out.
+    if (v.rare && !v.emergency) {
+      const pulse = 0.5 + 0.5 * Math.sin(this.frameT * 2.2 + hexSeed(v.tr.ac.hex));
+      const ringRgb: [number, number, number] = [255, 209, 102];
+      ctx.strokeStyle = rgba(ringRgb, (0.35 + 0.35 * pulse) * v.alpha);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, s * (1.9 + 0.12 * pulse), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    drawAircraftGlyph(
+      ctx, silhouette, s, color, v.alpha, this.frameT, hexSeed(v.tr.ac.hex),
+      cfg.glyphStyle,
+    );
     ctx.restore();
 
     if (cfg.showCarrierBadge && cfg.glyphSizePx >= 10) {
@@ -828,6 +1196,20 @@ export class Renderer {
           ? cfg.nearestN
           : 1;
     this.placedBoxes = [];
+    const plaque = this.airportPlaqueLayout(cfg);
+    if (plaque) {
+      // Keep aircraft labels out of the airport plaque zone.
+      this.placedBoxes.push({
+        x: plaque.x - 10,
+        y: plaque.y - 10,
+        w: plaque.w + 20,
+        h: plaque.h + 20,
+      });
+    }
+    if (cfg.theme === "focus") {
+      // Focus theme detail readout sits bottom-left.
+      this.placedBoxes.push({ x: 24, y: this.h - 140, w: this.w * 0.55, h: 72 });
+    }
     for (let i = 0; i < Math.min(limit, nearestFirst.length); i++) {
       // Nearest labels brightest; gently dim further ones (but keep readable).
       const prom = 1 - i / Math.max(1, nearestFirst.length);
@@ -894,7 +1276,7 @@ export class Renderer {
       const head = ac.origin ? `${ac.origin} → ${ac.destination}` : `→ ${ac.destination}`;
       out.push({ text: ac.destName ? `${head}   ${ac.destName}` : head, kind: "sub" });
       if (cfg.showRouteDetail && ac.destLat != null && ac.destLon != null) {
-        const bits: string[] = [`${localTimeAt(ac.destLon)} local`];
+        const bits: string[] = [`${localTime(ac.destLat, ac.destLon)} local`];
         if (ac.lat != null && ac.lon != null) {
           const mi = Math.round(greatCircleMiles(ac.lat, ac.lon, ac.destLat, ac.destLon));
           if (mi > 1) bits.push(`${mi.toLocaleString("en-US")} mi to go`);
@@ -1073,8 +1455,41 @@ function greatCircleMiles(lat1: number, lon1: number, lat2: number, lon2: number
   return 3958.8 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-/** Longitude-based mean solar time at a place (no DST/tz db) as HH:MM. */
-function localTimeAt(lon: number): string {
+// lat,lon (rounded) -> IANA timezone name ("" if lookup failed).
+const tzNameCache = new Map<string, string>();
+// timezone -> { minute stamp, formatted HH:MM } so we format at most once/min/zone.
+const tzTimeCache = new Map<string, { min: number; text: string }>();
+
+/** Wall-clock time at a place, DST-correct via a tz lookup, as HH:MM. Falls
+ *  back to longitude-based mean solar time if the lookup fails. */
+function localTime(lat: number, lon: number): string {
+  const key = `${lat.toFixed(2)},${lon.toFixed(2)}`;
+  let tz = tzNameCache.get(key);
+  if (tz === undefined) {
+    try {
+      tz = tzlookup(lat, lon);
+    } catch {
+      tz = "";
+    }
+    tzNameCache.set(key, tz);
+  }
+  if (!tz) return solarTimeAt(lon);
+
+  const min = Math.floor(Date.now() / 60000);
+  const cached = tzTimeCache.get(tz);
+  if (cached && cached.min === min) return cached.text;
+  const text = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(new Date());
+  tzTimeCache.set(tz, { min, text });
+  return text;
+}
+
+/** Longitude-based mean solar time (no DST/tz db) as HH:MM — last-resort fallback. */
+function solarTimeAt(lon: number): string {
   const now = new Date();
   const utcMin = now.getUTCHours() * 60 + now.getUTCMinutes();
   let m = (utcMin + (lon / 15) * 60) % 1440;

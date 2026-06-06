@@ -80,6 +80,7 @@ for (const row of readCsv(resolve(root, "data/airports.csv"))) {
     name: row.name,
     centerLat: round6(+row.latitude_deg),
     centerLon: round6(+row.longitude_deg),
+    ...(row.wikipedia_link ? { wikipediaLink: row.wikipedia_link } : {}),
   };
 }
 
@@ -136,6 +137,8 @@ export interface AirportCatalogEntry {
   label: string;
   centerLat: number;
   centerLon: number;
+  /** Wikipedia article URL (OurAirports) — used for a display thumbnail. */
+  wikipediaLink?: string;
   runways: Runway[];
 }
 

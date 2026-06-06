@@ -17,6 +17,8 @@ export interface AirportCatalogEntry {
   label: string;
   centerLat: number;
   centerLon: number;
+  /** Wikipedia article URL (OurAirports) — used for a display thumbnail. */
+  wikipediaLink?: string;
   runways: Runway[];
 }
 
@@ -60,6 +62,7 @@ export const AIRPORT_CATALOG: Record<string, AirportCatalogEntry> = {
     "name": "John F. Kennedy International Airport",
     "centerLat": 40.639447,
     "centerLon": -73.779317,
+    "wikipediaLink": "https://en.wikipedia.org/wiki/John_F._Kennedy_International_Airport",
     "label": "JFK — John F. Kennedy International Airport",
     "runways": [
       {
@@ -122,6 +125,7 @@ export const AIRPORT_CATALOG: Record<string, AirportCatalogEntry> = {
     "name": "Newark Liberty International Airport",
     "centerLat": 40.6894,
     "centerLon": -74.170545,
+    "wikipediaLink": "https://en.wikipedia.org/wiki/Newark_Liberty_International_Airport",
     "label": "EWR — Newark Liberty International Airport",
     "runways": [
       {
@@ -171,6 +175,7 @@ export const AIRPORT_CATALOG: Record<string, AirportCatalogEntry> = {
     "name": "LaGuardia Airport",
     "centerLat": 40.777199,
     "centerLon": -73.872597,
+    "wikipediaLink": "https://en.wikipedia.org/wiki/LaGuardia_Airport",
     "label": "LGA — LaGuardia Airport",
     "runways": [
       {
@@ -207,6 +212,7 @@ export const AIRPORT_CATALOG: Record<string, AirportCatalogEntry> = {
     "name": "Hartsfield Jackson Atlanta International Airport",
     "centerLat": 33.6367,
     "centerLon": -84.428101,
+    "wikipediaLink": "https://en.wikipedia.org/wiki/Hartsfield–Jackson_Atlanta_International_Airport",
     "label": "ATL — Hartsfield Jackson Atlanta International Airport",
     "runways": [
       {
@@ -282,6 +288,7 @@ export const AIRPORT_CATALOG: Record<string, AirportCatalogEntry> = {
     "name": "Dubai International Airport",
     "centerLat": 25.24979,
     "centerLon": 55.370992,
+    "wikipediaLink": "https://en.wikipedia.org/wiki/Dubai_International_Airport",
     "label": "DXB — Dubai International Airport",
     "runways": [
       {
@@ -318,6 +325,7 @@ export const AIRPORT_CATALOG: Record<string, AirportCatalogEntry> = {
     "name": "Dallas Fort Worth International Airport",
     "centerLat": 32.896801,
     "centerLon": -97.038002,
+    "wikipediaLink": "https://en.wikipedia.org/wiki/Dallas/Fort_Worth_International_Airport",
     "label": "DFW — Dallas Fort Worth International Airport",
     "runways": [
       {
@@ -419,6 +427,7 @@ export const AIRPORT_CATALOG: Record<string, AirportCatalogEntry> = {
     "name": "London Heathrow Airport",
     "centerLat": 51.470748,
     "centerLon": -0.459909,
+    "wikipediaLink": "https://en.wikipedia.org/wiki/Heathrow_Airport",
     "label": "LHR — London Heathrow Airport",
     "runways": [
       {
@@ -455,6 +464,7 @@ export const AIRPORT_CATALOG: Record<string, AirportCatalogEntry> = {
     "name": "İstanbul Airport",
     "centerLat": 41.274874,
     "centerLon": 28.732136,
+    "wikipediaLink": "https://en.wikipedia.org/wiki/Istanbul_Airport",
     "label": "IST — İstanbul Airport",
     "runways": [
       {
@@ -530,6 +540,7 @@ export const AIRPORT_CATALOG: Record<string, AirportCatalogEntry> = {
     "name": "Denver International Airport",
     "centerLat": 39.860027,
     "centerLon": -104.673792,
+    "wikipediaLink": "https://en.wikipedia.org/wiki/Denver_International_Airport",
     "label": "DEN — Denver International Airport",
     "runways": [
       {
@@ -618,6 +629,7 @@ export const AIRPORT_CATALOG: Record<string, AirportCatalogEntry> = {
     "name": "Singapore Changi Airport",
     "centerLat": 1.35019,
     "centerLon": 103.994003,
+    "wikipediaLink": "https://en.wikipedia.org/wiki/Singapore_Changi_Airport",
     "label": "SIN — Singapore Changi Airport",
     "runways": [
       {
@@ -654,6 +666,7 @@ export const AIRPORT_CATALOG: Record<string, AirportCatalogEntry> = {
     "name": "Los Angeles International Airport",
     "centerLat": 33.942501,
     "centerLon": -118.407997,
+    "wikipediaLink": "https://en.wikipedia.org/wiki/Los_Angeles_International_Airport",
     "label": "LAX — Los Angeles International Airport",
     "runways": [
       {
@@ -716,6 +729,7 @@ export const AIRPORT_CATALOG: Record<string, AirportCatalogEntry> = {
     "name": "Chicago O'Hare International Airport",
     "centerLat": 41.9786,
     "centerLon": -87.9048,
+    "wikipediaLink": "https://en.wikipedia.org/wiki/O'Hare_International_Airport",
     "label": "ORD — Chicago O'Hare International Airport",
     "runways": [
       {
@@ -830,6 +844,7 @@ export const AIRPORT_CATALOG: Record<string, AirportCatalogEntry> = {
     "name": "Indira Gandhi International Airport",
     "centerLat": 28.55563,
     "centerLon": 77.09519,
+    "wikipediaLink": "https://en.wikipedia.org/wiki/Indira_Gandhi_International_Airport",
     "label": "DEL — Indira Gandhi International Airport",
     "runways": [
       {

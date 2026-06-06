@@ -23,12 +23,21 @@ export function Row({ label, children, hint }: { label: string; children: ReactN
   );
 }
 
-export function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+export function Toggle({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+}) {
   return (
     <button
       className={`toggle ${value ? "on" : ""}`}
       role="switch"
       aria-checked={value}
+      disabled={disabled}
       onClick={() => onChange(!value)}
     >
       <span className="toggle-knob" />
@@ -106,6 +115,29 @@ export function Select({
     <select className="select" value={value} onChange={(e) => onChange(e.target.value)}>
       {children}
     </select>
+  );
+}
+
+export function TextInput({
+  value,
+  onChange,
+  placeholder,
+  disabled,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  disabled?: boolean;
+}) {
+  return (
+    <input
+      className="text-input"
+      type="search"
+      value={value}
+      placeholder={placeholder}
+      disabled={disabled}
+      onChange={(e) => onChange(e.target.value)}
+    />
   );
 }
 

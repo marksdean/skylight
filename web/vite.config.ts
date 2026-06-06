@@ -8,6 +8,9 @@ const SERVER = process.env.SERVER_URL ?? "http://localhost:3000";
 const QUIET_PROXY_ERRORS = new Set(["EPIPE", "ECONNRESET", "ECONNREFUSED"]);
 
 function isQuietProxyError(err: unknown): boolean {
+  if (err instanceof AggregateError) {
+    return err.errors.length > 0 && err.errors.every(isQuietProxyError);
+  }
   return (
     err instanceof Error &&
     "code" in err &&
@@ -16,12 +19,16 @@ function isQuietProxyError(err: unknown): boolean {
   );
 }
 
+function isProxyErrorMsg(msg: string): boolean {
+  return msg.includes("proxy error") || msg.includes("proxy socket error");
+}
+
 const logger = createLogger();
 const logError = logger.error.bind(logger);
 logger.error = (msg, options) => {
   if (
     typeof msg === "string" &&
-    (msg.includes("ws proxy socket error") || msg.includes("http proxy error")) &&
+    isProxyErrorMsg(msg) &&
     isQuietProxyError(options?.error)
   ) {
     return;

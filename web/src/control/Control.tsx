@@ -1,23 +1,30 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Config, ShowFields } from "@shared/index.js";
+import type { Config, ConfigPreset, ShowFields } from "@shared/index.js";
+import { activeMeteorShowers } from "@shared/index.js";
 import {
   AIRPORT_CATALOG,
   getAirport,
   listAirportGroups,
+  type ActiveAirportSummary,
+  type AirportSearchResult,
   type NearbyAirportSummary,
 } from "@shared/airport-resolve.js";
 import {
+  fetchActiveAirports,
   fetchNearbyAirports,
+  fetchSearchAirports,
   getCurrentPosition,
   selectAirport,
   selectPosition,
 } from "../lib/airportApi.js";
+import { applyPreset, deletePreset, fetchPresets, savePreset } from "../lib/presetsApi.js";
 import { useAirportLoader } from "../lib/useAirportLoader.js";
 import { unlockOverheadAudio, playOverheadPass } from "../lib/overheadSound.js";
 import { useOverheadAlert } from "../lib/useOverheadAlert.js";
 import { useStream } from "../lib/useStream.js";
 import { nextISSPass, type Tle } from "../display/celestial.js";
-import { ColorRow, Row, Section, Segmented, Select, Slider, Toggle } from "./components.js";
+import { PreviewCanvas } from "./PreviewCanvas.js";
+import { ColorRow, Row, Section, Segmented, Select, Slider, TextInput, Toggle } from "./components.js";
 
 function skyTimeLabel(offsetMin: number): string {
   if (offsetMin === 0) return "live";
@@ -29,6 +36,15 @@ function fmtIn(ms: number): string {
   const m = Math.max(0, Math.round(ms / 60000));
   if (m < 60) return `${m}m`;
   return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+function formatRelativeTime(ts: number): string {
+  const sec = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  if (sec < 60) return "just now";
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.round(min / 60);
+  return `${hr}h ago`;
 }
 
 const FIELD_LABELS: Record<keyof ShowFields, string> = {
@@ -67,8 +83,61 @@ export function Control() {
   const [nearbyLoading, setNearbyLoading] = useState(false);
   const [positionLoading, setPositionLoading] = useState(false);
   const [nearbyError, setNearbyError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<AirportSearchResult[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [active, setActive] = useState<ActiveAirportSummary[]>([]);
+  const [activeLoading, setActiveLoading] = useState(false);
+  const [activeRefreshing, setActiveRefreshing] = useState(false);
+  const [activeUpdatedAt, setActiveUpdatedAt] = useState<number | null>(null);
+  const [presets, setPresets] = useState<ConfigPreset[]>([]);
+  const [presetName, setPresetName] = useState("");
+  const [showPreview, setShowPreview] = useState(false);
   useAirportLoader(cfg?.airportIcao);
   useOverheadAlert(cfg ?? undefined, state.aircraft);
+
+  useEffect(() => {
+    void fetchPresets()
+      .then(setPresets)
+      .catch(() => {});
+  }, []);
+
+  const showers = useMemo(() => activeMeteorShowers(), []);
+
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (q.length < 2) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      return;
+    }
+    let on = true;
+    const timer = setTimeout(() => {
+      setSearchLoading(true);
+      void fetchSearchAirports(q)
+        .then((hits) => on && setSearchResults(hits))
+        .catch(() => on && setSearchResults([]))
+        .finally(() => on && setSearchLoading(false));
+    }, 300);
+    return () => {
+      on = false;
+      clearTimeout(timer);
+    };
+  }, [searchQuery]);
+
+  useEffect(() => {
+    if (!activeRefreshing) return;
+    const timer = setInterval(() => {
+      void fetchActiveAirports()
+        .then((data) => {
+          setActive(data.airports);
+          setActiveUpdatedAt(data.updatedAt);
+          setActiveRefreshing(data.refreshing);
+        })
+        .catch(() => {});
+    }, 8000);
+    return () => clearInterval(timer);
+  }, [activeRefreshing]);
 
   const staticIcaos = useMemo(
     () => new Set(listAirportGroups().flatMap((g) => g.icaos)),
@@ -85,6 +154,36 @@ export function Control() {
     } catch {
       setNearbyError("Could not load that airport.");
     }
+  }
+
+  function loadActiveAirports(refresh = false): void {
+    setActiveLoading(true);
+    setNearbyError(null);
+    void fetchActiveAirports(12, refresh)
+      .then((data) => {
+        setActive(data.airports);
+        setActiveUpdatedAt(data.updatedAt);
+        setActiveRefreshing(data.refreshing);
+      })
+      .catch(() => setNearbyError("Could not load active airports."))
+      .finally(() => setActiveLoading(false));
+  }
+
+  function saveCurrentPreset(): void {
+    const name = presetName.trim();
+    if (!name) return;
+    void savePreset(name)
+      .then((list) => {
+        setPresets(list);
+        setPresetName("");
+      })
+      .catch(() => setNearbyError("Could not save scene."));
+  }
+
+  function removePreset(id: string): void {
+    void deletePreset(id)
+      .then(setPresets)
+      .catch(() => setNearbyError("Could not delete scene."));
   }
 
   function findAirportsNearMe(): void {
@@ -154,6 +253,15 @@ export function Control() {
       </header>
 
       <main>
+        <Section title="Preview">
+          <Row label="Live preview" hint="mirror the ceiling here">
+            <Toggle value={showPreview} onChange={setShowPreview} />
+          </Row>
+          {showPreview && (
+            <PreviewCanvas config={cfg} aircraft={state.aircraft} now={state.now} />
+          )}
+        </Section>
+
         <Section title="Location">
           <Row label="Center" hint="airport field or your GPS position">
             <Select
@@ -167,6 +275,15 @@ export function Control() {
                   <option value="__position__">
                     My position ({cfg.centerLat.toFixed(4)}°, {cfg.centerLon.toFixed(4)}°)
                   </option>
+                </optgroup>
+              )}
+              {active.length > 0 && (
+                <optgroup label="Busiest right now">
+                  {active.map((ap) => (
+                    <option key={ap.icao} value={ap.icao}>
+                      {ap.label} ({ap.aircraftCount} ac)
+                    </option>
+                  ))}
                 </optgroup>
               )}
               {nearby.length > 0 && (
@@ -194,6 +311,34 @@ export function Control() {
               ))}
             </Select>
           </Row>
+          <Row label="Search" hint="name, IATA, or ICAO">
+            <TextInput
+              value={searchQuery}
+              onChange={setSearchQuery}
+              placeholder={searchLoading ? "Searching…" : "e.g. SFO, Heathrow"}
+            />
+          </Row>
+          {searchQuery.trim().length >= 2 && (
+            <div className="search-results">
+              {searchLoading && searchResults.length === 0 && (
+                <div className="search-empty">Searching…</div>
+              )}
+              {!searchLoading && searchResults.length === 0 && (
+                <div className="search-empty">No airports found.</div>
+              )}
+              {searchResults.map((ap) => (
+                <button
+                  key={ap.icao}
+                  type="button"
+                  className={`search-result ${cfg.airportIcao === ap.icao ? "on" : ""}`}
+                  onClick={() => void pickAirport(ap.icao)}
+                >
+                  <span className="search-result-label">{ap.label}</span>
+                  <span className="search-result-code">{ap.icao}</span>
+                </button>
+              ))}
+            </div>
+          )}
           <div className="chips">
             <button
               type="button"
@@ -211,7 +356,44 @@ export function Control() {
             >
               {nearbyLoading ? "Locating…" : "Airports near me"}
             </button>
+            <button
+              type="button"
+              className={`chip ${activeLoading || activeRefreshing ? "on" : ""}`}
+              disabled={activeLoading}
+              onClick={() => loadActiveAirports(false)}
+            >
+              {activeLoading || activeRefreshing ? "Scanning traffic…" : "Busiest right now"}
+            </button>
           </div>
+          {activeUpdatedAt && (
+            <div className="hint">
+              Live traffic ranking updated {formatRelativeTime(activeUpdatedAt)}
+              {activeRefreshing ? " · scan in progress" : ""}
+            </div>
+          )}
+          {active.length > 0 && (
+            <div className="chips">
+              {active.map((ap) => (
+                <button
+                  key={ap.icao}
+                  type="button"
+                  className={`chip ${cfg.airportIcao === ap.icao ? "on" : ""}`}
+                  onClick={() => void pickAirport(ap.icao)}
+                >
+                  {ap.iata || ap.icao} · {ap.aircraftCount} ac
+                </button>
+              ))}
+            </div>
+          )}
+          <Row label="Airport tour" hint="auto-cycle the busiest airports">
+            <Toggle value={cfg.airportTour} onChange={(v) => set({ airportTour: v })} />
+          </Row>
+          {cfg.airportTour && (
+            <Row label="Hop every">
+              <Slider value={cfg.airportTourIntervalSec} min={5} max={300} step={5} unit="s"
+                onChange={(v) => set({ airportTourIntervalSec: v })} />
+            </Row>
+          )}
           {cfg.locationMode === "position" && (
             <>
               <Row label="Overhead alert" hint="jet sound when a plane passes above you">
@@ -274,7 +456,24 @@ export function Control() {
             <Slider value={cfg.labelRotationDeg} min={0} max={355} step={5} unit="°"
               onChange={(v) => set({ labelRotationDeg: v })} />
           </Row>
-          <Row label="Radius">
+          <Row
+            label="Auto-fit airport"
+            hint={cfg.airportTour ? "always on during airport tour" : "zoom so runways fill the screen"}
+          >
+            <Toggle
+              value={cfg.autoZoomAirport || cfg.airportTour}
+              disabled={cfg.airportTour}
+              onChange={(v) => set({ autoZoomAirport: v })}
+            />
+          </Row>
+          <Row
+            label="Radius"
+            hint={
+              (cfg.autoZoomAirport || cfg.airportTour) && cfg.locationMode === "airport"
+                ? "auto-fit on — manual radius ignored"
+                : undefined
+            }
+          >
             <Slider value={cfg.radiusMiles} min={0.5} max={10} step={0.5} unit="mi"
               onChange={(v) => set({ radiusMiles: v })} />
           </Row>
@@ -298,6 +497,16 @@ export function Control() {
             <Slider value={cfg.glyphSizePx} min={6} max={40} step={1} unit="px"
               onChange={(v) => set({ glyphSizePx: v })} />
           </Row>
+          <Row label="Glyph style" hint="outline reads clearer over busy maps">
+            <Segmented
+              value={cfg.glyphStyle}
+              options={[
+                { value: "filled", label: "Filled" },
+                { value: "outline", label: "Outline" },
+                { value: "contour", label: "Contour" },
+              ]}
+              onChange={(v) => set({ glyphStyle: v })} />
+          </Row>
           <Row label="Carrier badge" hint="under each glyph">
             <Toggle value={cfg.showCarrierBadge} onChange={(v) => set({ showCarrierBadge: v })} />
           </Row>
@@ -319,6 +528,9 @@ export function Control() {
           </Row>
           <Row label="Color by altitude">
             <Toggle value={cfg.altitudeColor} onChange={(v) => set({ altitudeColor: v })} />
+          </Row>
+          <Row label="Highlight rare aircraft" hint="A380, 747, heavies, military">
+            <Toggle value={cfg.highlightRare} onChange={(v) => set({ highlightRare: v })} />
           </Row>
         </Section>
 
@@ -420,6 +632,17 @@ export function Control() {
             <Slider value={cfg.starMagLimit} min={1} max={4} step={0.1}
               onChange={(v) => set({ starMagLimit: v })} />
           </Row>
+          <Row label="Meteor showers" hint={
+            showers.length ? `active: ${showers.map((s) => s.name).join(", ")}` : "none active now"
+          }>
+            <Toggle value={cfg.showMeteorShowers} onChange={(v) => set({ showMeteorShowers: v })} />
+          </Row>
+          <Row label="Day / night tint" hint="subtle sky-color wash">
+            <Toggle value={cfg.dayNightTint} onChange={(v) => set({ dayNightTint: v })} />
+          </Row>
+          <Row label="Weather readout" hint="live, via Open-Meteo">
+            <Toggle value={cfg.showWeather} onChange={(v) => set({ showWeather: v })} />
+          </Row>
           <Row label="Sky time" hint={skyTimeLabel(cfg.skyTimeOffsetMin)}>
             <Slider value={cfg.skyTimeOffsetMin} min={-720} max={720} step={5} unit="m"
               onChange={(v) => set({ skyTimeOffsetMin: v })} />
@@ -445,6 +668,9 @@ export function Control() {
           <Row label="Local time & distance">
             <Toggle value={cfg.showRouteDetail} onChange={(v) => set({ showRouteDetail: v })} />
           </Row>
+          <Row label="Destination ticker" hint="scrolling list along the bottom">
+            <Toggle value={cfg.showDestTicker} onChange={(v) => set({ showDestTicker: v })} />
+          </Row>
         </Section>
 
         <Section title="Palette">
@@ -468,7 +694,57 @@ export function Control() {
           </div>
         </Section>
 
+        <Section title="Scenes">
+          <Row label="Save current look" hint="visual settings, not location">
+            <div className="scene-save">
+              <TextInput
+                value={presetName}
+                onChange={setPresetName}
+                placeholder="e.g. Dinner ambient"
+              />
+            </div>
+          </Row>
+          <div className="chips">
+            <button
+              type="button"
+              className="chip"
+              disabled={!presetName.trim()}
+              onClick={saveCurrentPreset}
+            >
+              Save scene
+            </button>
+          </div>
+          {presets.length === 0 ? (
+            <div className="hint">No saved scenes yet.</div>
+          ) : (
+            <div className="search-results">
+              {presets.map((p) => (
+                <div key={p.id} className="scene-row">
+                  <button
+                    type="button"
+                    className="scene-apply"
+                    onClick={() => void applyPreset(p.id)}
+                  >
+                    {p.name}
+                  </button>
+                  <button
+                    type="button"
+                    className="scene-delete"
+                    aria-label={`Delete ${p.name}`}
+                    onClick={() => removePreset(p.id)}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </Section>
+
         <Section title="System">
+          <div className="hint">
+            On the display: press <b>s</b> to save a screenshot, <b>h</b> for the HUD.
+          </div>
           <button className="reset" onClick={() => conn.resetConfig()}>
             Reset all to defaults
           </button>

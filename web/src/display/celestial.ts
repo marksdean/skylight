@@ -63,6 +63,18 @@ function starAltAz(raDeg: number, decDeg: number, lstHours: number, latDeg: numb
   return { az, alt: alt * R2D };
 }
 
+/** Equatorial (RA/Dec, J2000 deg) -> horizontal (az from N, alt) for a date+site. */
+export function equatorialToHorizontal(
+  raDeg: number,
+  decDeg: number,
+  date: Date,
+  latDeg: number,
+  lonDeg: number,
+): { az: number; alt: number } {
+  const lst = Astronomy.SiderealTime(date) + lonDeg / 15;
+  return starAltAz(raDeg, decDeg, lst, latDeg);
+}
+
 function bodyAltAz(
   body: Astronomy.Body,
   date: Date,

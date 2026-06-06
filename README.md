@@ -43,15 +43,22 @@ for your location and time. Tune everything from your phone.
 - **Smooth motion** — interpolates the ~1 Hz fixes to 60 fps by rendering slightly in
   the past and tweening between real positions (no teleporting).
 - **Comet trails**, altitude-graded color, and range rings + compass for orientation.
-- **The airport** (runways) drawn at its true position, so you watch departures and
-  arrivals line up with the runway.
+- **Rare-aircraft glow** — A380s, 747s, heavies, and big military transports get a warm
+  pulsing ring so you don't miss the good ones.
+- **Pick any airport from your phone** — search 2,800+ scheduled airports by name / IATA /
+  ICAO, jump to the ones **busiest right now** (ranked by live traffic), or auto-cycle
+  through them on a timer with **airport tour** mode. Runways + an airport plaque (name and
+  a Wikipedia photo) are drawn at their true position.
 - **Window to elsewhere** — each routed flight shows its destination **city, local time
-  there, and miles-to-go**, plus a faint great-circle arc toward where it's headed.
+  there, and miles-to-go**, a faint great-circle arc toward where it's headed, and an
+  optional slow **ticker** of where everything overhead is going.
 - **Live sky layer** — sun, moon (with phase), bright stars + constellation lines, and
   **satellites / ISS** computed from TLEs. Scrub time forward/back from your phone, or
-  jump straight to the next ISS pass.
+  jump straight to the next ISS pass. Plus **meteor-shower radiants** during active showers,
+  an optional sun-driven **day/night tint**, and a live **weather** readout.
 - **Phone control panel** — every setting (rotation, theme, palette, filters, sky
-  toggles, …) is live-tunable over your LAN and persists across reboots.
+  toggles, …) is live-tunable over your LAN and persists across reboots. Save named
+  **scenes**, and watch a **live preview** of the ceiling while you calibrate.
 - **Appliance-ready** — boots straight to a full-screen kiosk on a Raspberry Pi 5.
 
 ## Hardware
@@ -95,8 +102,9 @@ DATA_SOURCE=api pnpm dev
 - **Display:** http://localhost:5173/
 - **Control panel:** http://localhost:5173/control.html (or from your phone: `http://<your-ip>:5173/control.html`)
 
-Set your location in the control panel area is coming; for now set `centerLat` /
-`centerLon` in [`shared/src/config.ts`](shared/src/config.ts) (defaults to SFO).
+Set your location right in the control panel: search for an airport, tap **Use my
+position**, or browse the airports **busiest right now**. Runways load on demand, so any
+scheduled airport works out of the box (defaults to SFO).
 
 ### With a radio (locally)
 
@@ -124,18 +132,25 @@ fields:
 
 | | |
 |---|---|
-| `centerLat` / `centerLon` | **Your location** — where you're looking up. |
+| `airportIcao` / `centerLat` / `centerLon` | **Your location** — set via the airport picker or "Use my position". |
 | `radiusMiles` | How far out to show (default 3 — "what you could realistically see"). |
+| `autoZoomAirport` | Auto-fit the zoom so the airport's runways fill the screen (always on during the airport tour). |
+| `glyphStyle` | Draw aircraft as `filled` silhouettes, per-part `outline`s, or a single `contour` outline (clearer over busy maps). |
 | `rotationDeg` / `mirrorX` | Calibration for the looking-up flip (tune against a real pass). |
 | `theme` | `ambient` · `telemetry` · `focus`. |
+| `highlightRare` | Glow rare/iconic aircraft (A380, 747, heavies, military). |
+| `airportTour` / `airportTourIntervalSec` | Auto-cycle the busiest airports (default every 10 s). |
 | `showStars` / `showSun` / `showMoon` / `showSatellites` | Sky layer toggles. |
+| `showMeteorShowers` / `dayNightTint` / `showWeather` | Sky extras (radiants, sun-driven tint, live weather). |
 | `skyTimeOffsetMin` | Scrub the sky clock for testing (0 = live). |
-| `showDestArc` / `showRouteDetail` | "Window to elsewhere". |
+| `showDestArc` / `showRouteDetail` / `showDestTicker` | "Window to elsewhere". |
 
-**Using it somewhere other than SFO:** set `centerLat`/`centerLon`, and replace the
-runway geometry in [`web/src/display/airports.ts`](web/src/display/airports.ts) with your
-local airport (coordinates from [OurAirports](https://ourairports.com/data/)). Stars,
-sun, moon, and satellites are computed for your coordinates automatically.
+**Using it somewhere other than SFO:** just pick your airport (or "Use my position") in
+the control panel — runway geometry is fetched on demand from
+[OurAirports](https://ourairports.com/data/) and the sky is computed for your coordinates
+automatically. Saved as `airportIcao` + `centerLat`/`centerLon` in the config.
+
+Scenes are saved separately to `server/data/presets.json`.
 
 ### Server environment
 
@@ -178,9 +193,10 @@ RTL-SDR ──USB──> dump1090-fa ──> aircraft.json (:8080)
 - ADS-B decode: [dump1090-fa](https://github.com/flightaware/dump1090) · RTL-SDR Blog
   [drivers](https://github.com/rtlsdrblog/rtl-sdr-blog)
 - Routes / aircraft enrichment: [adsbdb](https://www.adsbdb.com/) ·
-  fallback feed: [airplanes.live](https://airplanes.live/)
-- Satellite elements: [Celestrak](https://celestrak.org/) · airport data:
-  [OurAirports](https://ourairports.com/)
+  fallback feed + live airport traffic: [airplanes.live](https://airplanes.live/)
+- Satellite elements: [Celestrak](https://celestrak.org/) · airport data + photos:
+  [OurAirports](https://ourairports.com/) + [Wikipedia](https://www.wikipedia.org/)
+- Weather: [Open-Meteo](https://open-meteo.com/)
 
 ## License
 

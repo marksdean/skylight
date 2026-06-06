@@ -188,6 +188,8 @@ export function classifyGlyph(ac: Aircraft): GlyphKind {
 type RGB = [number, number, number];
 const col = (c: RGB, a: number) => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
 
+export type GlyphStyle = "filled" | "outline" | "contour";
+
 export function drawAircraftGlyph(
   ctx: CanvasRenderingContext2D,
   kind: SilhouetteKind,
@@ -196,10 +198,19 @@ export function drawAircraftGlyph(
   alpha: number,
   t: number,
   seed: number,
+  style: GlyphStyle = "filled",
 ): void {
   withGlyphBuffer(ctx, s, alpha, (bctx) => {
-    bctx.shadowColor = col(color, 0.85);
-    bctx.shadowBlur = s * 0.7;
+    outlineMode = style === "outline";
+    contourMode = style === "contour";
+    outlineWidth = Math.max(1, s * 0.07);
+    if (contourMode) {
+      // Build a crisp solid union first; glow would blur the edge we trace.
+      bctx.shadowBlur = 0;
+    } else {
+      bctx.shadowColor = col(color, 0.85);
+      bctx.shadowBlur = s * (outlineMode ? 0.5 : 0.7);
+    }
 
     switch (kind) {
       case "superjumbo":
@@ -298,14 +309,75 @@ export function drawAircraftGlyph(
         mainRotor(bctx, s, color, t * 6 + seed);
         break;
     }
+    if (contourMode) traceContour(bctx, s);
   });
 }
 
 // --- drawing primitives ---
 
+// Set per glyph in drawAircraftGlyph; rendering is synchronous so a module-level
+// flag is safe and avoids threading a param through every shape helper.
+let outlineMode = false;
+let contourMode = false;
+let outlineWidth = 1.2;
+
 function fillSilhouette(ctx: CanvasRenderingContext2D, color: RGB): void {
+  if (outlineMode) {
+    ctx.strokeStyle = col(color, 1);
+    ctx.lineWidth = outlineWidth;
+    ctx.lineJoin = "round";
+    ctx.stroke();
+    return;
+  }
+  // Contour mode fills each part solid; the union is traced into a single outer
+  // outline once the whole silhouette is assembled (see traceContour).
   ctx.fillStyle = col(color, 1);
   ctx.fill();
+}
+
+// Erosion scratch for contour mode. Sized to match the glyph buffer on demand.
+let erodeCanvas: HTMLCanvasElement | null = null;
+let erodeCtx: CanvasRenderingContext2D | null = null;
+
+/**
+ * Convert the solid silhouette already drawn in `bctx` into a single continuous
+ * outer outline: erode a copy of the union, then punch it out of the original,
+ * leaving only the boundary band. Works for the union of overlapping parts, so
+ * interior seams between wing/fuselage/tail disappear.
+ */
+function traceContour(bctx: CanvasRenderingContext2D, s: number): void {
+  const size = bctx.canvas.width;
+  if (!erodeCanvas) {
+    erodeCanvas = document.createElement("canvas");
+    erodeCtx = erodeCanvas.getContext("2d")!;
+  }
+  if (erodeCanvas.width !== size) {
+    erodeCanvas.width = size;
+    erodeCanvas.height = size;
+  }
+  const ec = erodeCtx!;
+  ec.setTransform(1, 0, 0, 1, 0, 0);
+  ec.globalCompositeOperation = "source-over";
+  ec.clearRect(0, 0, size, size);
+  ec.drawImage(bctx.canvas, 0, 0);
+
+  // Intersect the union with copies shifted in 8 directions => morphological
+  // erosion by ~w px. What survives is the interior; the rest is the border.
+  const w = Math.max(0.75, s * 0.03);
+  ec.globalCompositeOperation = "destination-in";
+  const dirs = [
+    [1, 0], [-1, 0], [0, 1], [0, -1],
+    [0.7071, 0.7071], [-0.7071, 0.7071], [0.7071, -0.7071], [-0.7071, -0.7071],
+  ];
+  for (const [dx, dy] of dirs) ec.drawImage(bctx.canvas, dx * w, dy * w);
+  ec.globalCompositeOperation = "source-over";
+
+  bctx.save();
+  bctx.setTransform(1, 0, 0, 1, 0, 0);
+  bctx.globalCompositeOperation = "destination-out";
+  bctx.drawImage(erodeCanvas, 0, 0);
+  bctx.globalCompositeOperation = "source-over";
+  bctx.restore();
 }
 
 interface LowWingJetOpts {
@@ -572,6 +644,7 @@ function propDisc(
   hub = true,
   blades = 4,
 ): void {
+  if (contourMode) return;
   ctx.save();
   ctx.translate(cx, cy);
   ctx.rotate(spin);
@@ -604,6 +677,7 @@ function mainRotor(
   color: RGB,
   spin: number,
 ): void {
+  if (contourMode) return;
   const r = 1.15 * s;
   ctx.save();
   ctx.translate(0, -0.15 * s);
@@ -627,6 +701,7 @@ function mainRotor(
 }
 
 function core(ctx: CanvasRenderingContext2D, s: number, r: number): void {
+  if (contourMode) return;
   ctx.shadowBlur = 0;
   ctx.fillStyle = col([255, 255, 255], 0.75);
   ctx.beginPath();

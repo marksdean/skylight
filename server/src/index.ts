@@ -15,6 +15,12 @@ import { Hub } from "./hub.js";
 import { TleStore } from "./tle.js";
 import { AirportLookup } from "./airport-lookup.js";
 import { fetchCarrierLogo } from "./carrier-logos.js";
+import { fetchAirportPhoto } from "./airport-photos.js";
+import { AirportActivityStore } from "./airport-activity.js";
+import { TourController } from "./airport-tour.js";
+import { PresetStore } from "./preset-store.js";
+import { WeatherStore } from "./weather-store.js";
+import { presetVisualPatch } from "@shared/index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = resolve(__dirname, "../data");
@@ -35,22 +41,23 @@ const API_POLL_MS = Number(process.env.API_POLL_MS ?? 4000);
 
 async function main(): Promise<void> {
   const store = new ConfigStore(resolve(DATA_DIR, "config.json"));
-  await store.load();
-
   const enricher = new RouteEnricher(
     resolve(DATA_DIR, "route-cache.json"),
     ROUTE_CACHE_HOURS,
   );
-  await enricher.load();
-
   const tleStore = new TleStore(resolve(DATA_DIR, "tle-cache.json"));
-  await tleStore.load();
-
   const airportLookup = new AirportLookup(
     resolve(__dirname, "../../data/airports.csv"),
     resolve(__dirname, "../../data/runways.csv"),
   );
-  await airportLookup.load();
+  const airportActivity = new AirportActivityStore(airportLookup);
+  const presets = new PresetStore(resolve(DATA_DIR, "presets.json"));
+  const weather = new WeatherStore();
+  const tour = new TourController(store, airportActivity, airportLookup);
+
+  await Promise.all([store.load(), enricher.load(), tleStore.load(), presets.load()]);
+  airportActivity.start();
+  tour.start();
 
   const app = express();
   app.use(express.json());
@@ -97,10 +104,61 @@ async function main(): Promise<void> {
     );
     res.json(nearby);
   });
+  app.get("/api/airports/search", async (req, res) => {
+    const q = String(req.query.q ?? "").trim();
+    const limit = Number(req.query.limit ?? 15);
+    if (q.length < 2) return res.status(400).json({ error: "q must be at least 2 characters" });
+    const hits = await airportLookup.search(
+      q,
+      Number.isFinite(limit) ? Math.min(30, Math.max(1, limit)) : 15,
+    );
+    res.json(hits);
+  });
+  app.get("/api/airports/active", async (req, res) => {
+    const limit = Number(req.query.limit ?? 12);
+    const refresh = req.query.refresh === "1";
+    const capped = Number.isFinite(limit) ? Math.min(30, Math.max(1, limit)) : 12;
+    if (refresh) {
+      res.json(await airportActivity.refreshNow(capped));
+      return;
+    }
+    res.json(airportActivity.get(capped));
+  });
   app.get("/api/airports/:icao", async (req, res) => {
     const ap = await airportLookup.getAirport(String(req.params.icao).toUpperCase());
     if (!ap) return res.status(404).json({ error: "airport not found" });
     res.json(ap);
+  });
+  app.get("/api/airport-photo/:icao", async (req, res) => {
+    const ap = await airportLookup.getAirport(String(req.params.icao).toUpperCase());
+    if (!ap?.wikipediaLink) return res.status(404).end();
+    const photo = await fetchAirportPhoto(ap.wikipediaLink);
+    if (!photo) return res.status(404).end();
+    res.set("Cache-Control", "public, max-age=604800");
+    res.type(photo.contentType).send(photo.body);
+  });
+  app.get("/api/weather", async (_req, res) => {
+    const cfg = store.get();
+    const snap = await weather.get(cfg.centerLat, cfg.centerLon);
+    if (!snap) return res.status(503).json({ error: "weather unavailable" });
+    res.json(snap);
+  });
+  app.get("/api/presets", (_req, res) => res.json(presets.list()));
+  app.post("/api/presets", (req, res) => {
+    const name = String(req.body?.name ?? "").trim();
+    if (!name) return res.status(400).json({ error: "name is required" });
+    presets.add(name, store.get());
+    res.json(presets.list());
+  });
+  app.post("/api/presets/:id/apply", (req, res) => {
+    const preset = presets.get(String(req.params.id));
+    if (!preset) return res.status(404).json({ error: "preset not found" });
+    const config = store.patch(presetVisualPatch(preset));
+    res.json(config);
+  });
+  app.delete("/api/presets/:id", (req, res) => {
+    presets.remove(String(req.params.id));
+    res.json(presets.list());
   });
   app.get("/api/carrier-logo/:iata", async (req, res) => {
     const logo = await fetchCarrierLogo(String(req.params.iata));

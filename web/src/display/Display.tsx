@@ -5,9 +5,25 @@ import { useStream } from "../lib/useStream.js";
 import { useAirportLoader } from "../lib/useAirportLoader.js";
 import { unlockOverheadAudio } from "../lib/overheadSound.js";
 import { useOverheadAlert } from "../lib/useOverheadAlert.js";
+import { fetchWeather } from "../lib/airportApi.js";
 import { Renderer } from "./renderer.js";
 
 const THEMES: Theme[] = ["ambient", "telemetry", "focus"];
+
+/** Save the current canvas frame as a PNG (press "s" on the display). */
+function captureScreenshot(canvas: HTMLCanvasElement | null): void {
+  if (!canvas) return;
+  try {
+    const url = canvas.toDataURL("image/png");
+    const a = document.createElement("a");
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    a.href = url;
+    a.download = `skylight-${stamp}.png`;
+    a.click();
+  } catch {
+    /* canvas may be tainted; ignore */
+  }
+}
 
 export function Display() {
   const { state, conn } = useStream("display");
@@ -48,6 +64,26 @@ export function Display() {
     rendererRef.current?.update(state.aircraft);
   }, [state.now, state.aircraft]);
 
+  // Poll live weather for the on-screen readout / tint (when either is enabled).
+  const wantWeather = !!state.config?.showWeather || !!state.config?.dayNightTint;
+  useEffect(() => {
+    if (!wantWeather) {
+      rendererRef.current?.setWeather(null);
+      return;
+    }
+    let on = true;
+    const load = () =>
+      void fetchWeather().then((w) => {
+        if (on) rendererRef.current?.setWeather(w);
+      });
+    load();
+    const id = setInterval(load, 5 * 60_000);
+    return () => {
+      on = false;
+      clearInterval(id);
+    };
+  }, [wantWeather, state.config?.centerLat, state.config?.centerLon]);
+
   // Keyboard calibration (handy when a keyboard is plugged into the Pi).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -78,6 +114,9 @@ export function Display() {
           break;
         case "h":
           conn.patchConfig({ showHud: !c.showHud });
+          break;
+        case "s":
+          captureScreenshot(canvasRef.current);
           break;
       }
     };

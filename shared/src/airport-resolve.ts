@@ -24,6 +24,24 @@ export interface NearbyAirportSummary {
   distanceMi: number;
 }
 
+export type AirportSearchResult = Omit<NearbyAirportSummary, "distanceMi">;
+
+export interface ActiveAirportSummary {
+  icao: string;
+  iata: string;
+  name: string;
+  label: string;
+  centerLat: number;
+  centerLon: number;
+  aircraftCount: number;
+}
+
+export interface ActiveAirportsResponse {
+  airports: ActiveAirportSummary[];
+  updatedAt: number | null;
+  refreshing: boolean;
+}
+
 export function registerAirport(entry: AirportCatalogEntry): void {
   runtime.set(entry.icao, entry);
 }

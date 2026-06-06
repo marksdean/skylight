@@ -13,9 +13,6 @@ body,
   background: #000;
   overflow: hidden;
 }
-.display-body {
-  cursor: none; /* hidden on the projector; unclutter also runs on the Pi */
-}
 .display-root {
   position: fixed;
   inset: 0;

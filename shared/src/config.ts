@@ -53,6 +53,8 @@ export interface Config {
   /** Play a jet pass sound when traffic crosses overhead (position mode only). */
   overheadAlert: boolean;
   radiusMiles: number;
+  /** Auto-fit the zoom so the airport's runways fill the screen (airport mode). */
+  autoZoomAirport: boolean;
 
   // --- calibration (tune against a real overhead pass) ---
   /** Rotate the whole field, degrees. */
@@ -86,6 +88,8 @@ export interface Config {
   palette: Palette;
   fonts: Fonts;
   glyphSizePx: number;
+  /** Aircraft glyph rendering: solid fill, per-part outline, or single contour. */
+  glyphStyle: "filled" | "outline" | "contour";
   /** Show a small carrier code badge on each aircraft glyph. */
   showCarrierBadge: boolean;
   /** Carrier badge style: ICAO code text or airline logo icon. */
@@ -125,6 +129,24 @@ export interface Config {
   showDestArc: boolean;
   /** Add destination local time + distance-to-go to labels. */
   showRouteDetail: boolean;
+  /** Slow ticker of overhead destinations along the bottom edge. */
+  showDestTicker: boolean;
+
+  // --- ambient extras ---
+  /** Tint the background subtly with the real sun altitude (day/twilight/night). */
+  dayNightTint: boolean;
+  /** Glow rare/iconic aircraft (A380, 747, heavies, military transports). */
+  highlightRare: boolean;
+  /** Draw active meteor-shower radiants when one is peaking. */
+  showMeteorShowers: boolean;
+  /** Show a small live weather readout (and faint cloud dimming). */
+  showWeather: boolean;
+
+  // --- airport tour ---
+  /** Auto-cycle the view through the busiest airports right now. */
+  airportTour: boolean;
+  /** Seconds between airport tour hops. */
+  airportTourIntervalSec: number;
 }
 
 const defaultAirport = airportConfigPatch(DEFAULT_AIRPORT_ICAO);
@@ -136,6 +158,7 @@ export const DEFAULT_CONFIG: Config = {
   locationMode: "airport",
   overheadAlert: false,
   radiusMiles: 3,
+  autoZoomAirport: false,
 
   rotationDeg: 0,
   mirrorX: true,
@@ -168,6 +191,7 @@ export const DEFAULT_CONFIG: Config = {
     mono: "'JetBrains Mono', ui-monospace, monospace",
   },
   glyphSizePx: 22,
+  glyphStyle: "filled",
   showCarrierBadge: true,
   carrierBadgeStyle: "code",
   altitudeColor: true,
@@ -202,6 +226,15 @@ export const DEFAULT_CONFIG: Config = {
 
   showDestArc: true,
   showRouteDetail: true,
+  showDestTicker: false,
+
+  dayNightTint: false,
+  highlightRare: true,
+  showMeteorShowers: true,
+  showWeather: false,
+
+  airportTour: false,
+  airportTourIntervalSec: 10,
 };
 
 /**

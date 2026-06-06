@@ -6,6 +6,7 @@ import {
   AIRPORT_CATALOG,
   airportLabel,
   type AirportCatalogEntry,
+  type AirportSearchResult,
   type NearbyAirportSummary,
   type Runway,
 } from "@shared/airport-resolve.js";
@@ -22,6 +23,7 @@ interface AirportRow {
   centerLat: number;
   centerLon: number;
   scheduled: boolean;
+  wikipediaLink: string;
 }
 
 function parseCsvLine(line: string): string[] {
@@ -46,8 +48,8 @@ function parseCsvLine(line: string): string[] {
 }
 
 async function loadCsv(path: string): Promise<Record<string, string>[]> {
-  const { readFileSync } = await import("node:fs");
-  const raw = readFileSync(path, "utf8").trim();
+  const { readFile } = await import("node:fs/promises");
+  const raw = (await readFile(path, "utf8")).trim();
   const lines = raw.split("\n");
   const headers = parseCsvLine(lines[0]).map((h) => h.replace(/^"|"$/g, ""));
   return lines.slice(1).map((line) => {
@@ -68,6 +70,7 @@ function entryFromRow(row: AirportRow, runways: Runway[]): AirportCatalogEntry {
     label: airportLabel({ icao: row.icao, iata: row.iata, name: row.name }),
     centerLat: row.centerLat,
     centerLon: row.centerLon,
+    ...(row.wikipediaLink ? { wikipediaLink: row.wikipediaLink } : {}),
     runways,
   };
 }
@@ -102,6 +105,7 @@ export class AirportLookup {
         centerLat: round6(centerLat),
         centerLon: round6(centerLon),
         scheduled: true,
+        wikipediaLink: row.wikipedia_link ?? "",
       });
     }
 
@@ -130,6 +134,41 @@ export class AirportLookup {
     // Drop airports with no drawable runways.
     this.airports = this.airports.filter((ap) => (this.runwaysByIcao.get(ap.icao)?.length ?? 0) > 0);
     console.log(`[airports] indexed ${this.airports.length} scheduled airports with runways`);
+  }
+
+  async search(query: string, limit = 15): Promise<AirportSearchResult[]> {
+    await this.ready;
+    const q = query.trim();
+    if (q.length < 2) return [];
+
+    const qUpper = q.toUpperCase();
+    const qLower = q.toLowerCase();
+    const looksLikeCode = /^[a-z0-9]{2,4}$/i.test(q);
+    const hits: { ap: AirportRow; score: number }[] = [];
+
+    for (const ap of this.airports) {
+      let score = 0;
+      if (ap.icao === qUpper) score = 100;
+      else if (ap.iata === qUpper) score = 95;
+      else if (ap.icao.startsWith(qUpper)) score = 80;
+      else if (ap.iata.startsWith(qUpper)) score = 75;
+      else if (!looksLikeCode && ap.name.toLowerCase().includes(qLower)) score = 50;
+      else continue;
+      hits.push({ ap, score });
+    }
+
+    hits.sort(
+      (a, b) => b.score - a.score || a.ap.name.localeCompare(b.ap.name) || a.ap.icao.localeCompare(b.ap.icao),
+    );
+
+    return hits.slice(0, limit).map(({ ap }) => ({
+      icao: ap.icao,
+      iata: ap.iata,
+      name: ap.name,
+      label: airportLabel(ap),
+      centerLat: ap.centerLat,
+      centerLon: ap.centerLon,
+    }));
   }
 
   async findNearby(
