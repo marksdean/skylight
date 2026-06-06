@@ -84,6 +84,7 @@ export function Control() {
   const [positionLoading, setPositionLoading] = useState(false);
   const [nearbyError, setNearbyError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchKind, setSearchKind] = useState<"airport" | "heliport">("airport");
   const [searchResults, setSearchResults] = useState<AirportSearchResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [active, setActive] = useState<ActiveAirportSummary[]>([]);
@@ -114,7 +115,7 @@ export function Control() {
     let on = true;
     const timer = setTimeout(() => {
       setSearchLoading(true);
-      void fetchSearchAirports(q)
+      void fetchSearchAirports(q, 15, searchKind)
         .then((hits) => on && setSearchResults(hits))
         .catch(() => on && setSearchResults([]))
         .finally(() => on && setSearchLoading(false));
@@ -123,12 +124,12 @@ export function Control() {
       on = false;
       clearTimeout(timer);
     };
-  }, [searchQuery]);
+  }, [searchQuery, searchKind]);
 
   useEffect(() => {
     if (!activeRefreshing) return;
     const timer = setInterval(() => {
-      void fetchActiveAirports()
+      void fetchActiveAirports(12, false, searchKind)
         .then((data) => {
           setActive(data.airports);
           setActiveUpdatedAt(data.updatedAt);
@@ -137,7 +138,14 @@ export function Control() {
         .catch(() => {});
     }, 8000);
     return () => clearInterval(timer);
-  }, [activeRefreshing]);
+  }, [activeRefreshing, searchKind]);
+
+  useEffect(() => {
+    // Switching airport/heliport mode invalidates the current "busiest" list.
+    setActive([]);
+    setActiveUpdatedAt(null);
+    setActiveRefreshing(false);
+  }, [searchKind]);
 
   const staticIcaos = useMemo(
     () => new Set(listAirportGroups().flatMap((g) => g.icaos)),
@@ -159,13 +167,15 @@ export function Control() {
   function loadActiveAirports(refresh = false): void {
     setActiveLoading(true);
     setNearbyError(null);
-    void fetchActiveAirports(12, refresh)
+    void fetchActiveAirports(12, refresh, searchKind)
       .then((data) => {
         setActive(data.airports);
         setActiveUpdatedAt(data.updatedAt);
         setActiveRefreshing(data.refreshing);
       })
-      .catch(() => setNearbyError("Could not load active airports."))
+      .catch(() =>
+        setNearbyError(`Could not load active ${searchKind === "heliport" ? "heliports" : "airports"}.`),
+      )
       .finally(() => setActiveLoading(false));
   }
 
@@ -311,11 +321,26 @@ export function Control() {
               ))}
             </Select>
           </Row>
+          <Row label="Search for" hint="airports or heliports">
+            <Segmented
+              value={searchKind}
+              options={[
+                { value: "airport", label: "Airports" },
+                { value: "heliport", label: "Heliports" },
+              ]}
+              onChange={(v) => setSearchKind(v as "airport" | "heliport")} />
+          </Row>
           <Row label="Search" hint="name, IATA, or ICAO">
             <TextInput
               value={searchQuery}
               onChange={setSearchQuery}
-              placeholder={searchLoading ? "Searching…" : "e.g. SFO, Heathrow"}
+              placeholder={
+                searchLoading
+                  ? "Searching…"
+                  : searchKind === "heliport"
+                    ? "e.g. JRB, Battersea"
+                    : "e.g. SFO, Heathrow"
+              }
             />
           </Row>
           {searchQuery.trim().length >= 2 && (
@@ -324,7 +349,9 @@ export function Control() {
                 <div className="search-empty">Searching…</div>
               )}
               {!searchLoading && searchResults.length === 0 && (
-                <div className="search-empty">No airports found.</div>
+                <div className="search-empty">
+                  No {searchKind === "heliport" ? "heliports" : "airports"} found.
+                </div>
               )}
               {searchResults.map((ap) => (
                 <button
@@ -362,7 +389,11 @@ export function Control() {
               disabled={activeLoading}
               onClick={() => loadActiveAirports(false)}
             >
-              {activeLoading || activeRefreshing ? "Scanning traffic…" : "Busiest right now"}
+              {activeLoading || activeRefreshing
+                ? "Scanning traffic…"
+                : searchKind === "heliport"
+                  ? "Busiest heliports now"
+                  : "Busiest right now"}
             </button>
           </div>
           {activeUpdatedAt && (
@@ -380,7 +411,7 @@ export function Control() {
                   className={`chip ${cfg.airportIcao === ap.icao ? "on" : ""}`}
                   onClick={() => void pickAirport(ap.icao)}
                 >
-                  {ap.iata || ap.icao} · {ap.aircraftCount} ac
+                  {ap.iata || ap.icao} · {ap.aircraftCount} {searchKind === "heliport" ? "heli" : "ac"}
                 </button>
               ))}
             </div>
@@ -486,6 +517,7 @@ export function Control() {
                 { value: "ambient", label: "Ambient" },
                 { value: "telemetry", label: "Telemetry" },
                 { value: "focus", label: "Focus" },
+                { value: "basic", label: "Basic" },
               ]}
               onChange={(v) => set({ theme: v })} />
           </Row>

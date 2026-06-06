@@ -45,10 +45,12 @@ for your location and time. Tune everything from your phone.
 - **Comet trails**, altitude-graded color, and range rings + compass for orientation.
 - **Rare-aircraft glow** — A380s, 747s, heavies, and big military transports get a warm
   pulsing ring so you don't miss the good ones.
-- **Pick any airport from your phone** — search 2,800+ scheduled airports by name / IATA /
-  ICAO, jump to the ones **busiest right now** (ranked by live traffic), or auto-cycle
-  through them on a timer with **airport tour** mode. Runways + an airport plaque (name and
-  a Wikipedia photo) are drawn at their true position.
+- **Pick any airport from your phone** — search 2,800+ scheduled airports (or switch the
+  search to **heliports**) by name / IATA / ICAO, jump to the ones **busiest right now**
+  (airports ranked by live traffic, heliports ranked by live helicopter traffic), or
+  auto-cycle through them on a timer with **airport tour** mode. Runways + an airport
+  plaque (name and a Wikipedia photo) are drawn at their true position; heliports get a
+  circled-H pad marker.
 - **Window to elsewhere** — each routed flight shows its destination **city, local time
   there, and miles-to-go**, a faint great-circle arc toward where it's headed, and an
   optional slow **ticker** of where everything overhead is going.
@@ -137,7 +139,7 @@ fields:
 | `autoZoomAirport` | Auto-fit the zoom so the airport's runways fill the screen (always on during the airport tour). |
 | `glyphStyle` | Draw aircraft as `filled` silhouettes, per-part `outline`s, or a single `contour` outline (clearer over busy maps). |
 | `rotationDeg` / `mirrorX` | Calibration for the looking-up flip (tune against a real pass). |
-| `theme` | `ambient` · `telemetry` · `focus`. |
+| `theme` | `ambient` · `telemetry` · `focus` · `basic` (glyphs + flight number only). |
 | `highlightRare` | Glow rare/iconic aircraft (A380, 747, heavies, military). |
 | `airportTour` / `airportTourIntervalSec` | Auto-cycle the busiest airports (default every 10 s). |
 | `showStars` / `showSun` / `showMoon` / `showSatellites` | Sky layer toggles. |

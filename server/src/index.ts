@@ -51,6 +51,11 @@ async function main(): Promise<void> {
     resolve(__dirname, "../../data/runways.csv"),
   );
   const airportActivity = new AirportActivityStore(airportLookup);
+  const heliportActivity = new AirportActivityStore(airportLookup, {
+    helicoptersOnly: true,
+    radiusNm: 8,
+    candidates: () => airportLookup.candidateHeliports(),
+  });
   const presets = new PresetStore(resolve(DATA_DIR, "presets.json"));
   const weather = new WeatherStore();
   const tour = new TourController(store, airportActivity, airportLookup);
@@ -108,9 +113,11 @@ async function main(): Promise<void> {
     const q = String(req.query.q ?? "").trim();
     const limit = Number(req.query.limit ?? 15);
     if (q.length < 2) return res.status(400).json({ error: "q must be at least 2 characters" });
+    const kind = req.query.kind === "heliport" ? "heliport" : "airport";
     const hits = await airportLookup.search(
       q,
       Number.isFinite(limit) ? Math.min(30, Math.max(1, limit)) : 15,
+      kind,
     );
     res.json(hits);
   });
@@ -118,11 +125,12 @@ async function main(): Promise<void> {
     const limit = Number(req.query.limit ?? 12);
     const refresh = req.query.refresh === "1";
     const capped = Number.isFinite(limit) ? Math.min(30, Math.max(1, limit)) : 12;
+    const activity = req.query.kind === "heliport" ? heliportActivity : airportActivity;
     if (refresh) {
-      res.json(await airportActivity.refreshNow(capped));
+      res.json(await activity.refreshNow(capped));
       return;
     }
-    res.json(airportActivity.get(capped));
+    res.json(activity.get(capped));
   });
   app.get("/api/airports/:icao", async (req, res) => {
     const ap = await airportLookup.getAirport(String(req.params.icao).toUpperCase());

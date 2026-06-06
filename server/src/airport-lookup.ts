@@ -75,8 +75,11 @@ function entryFromRow(row: AirportRow, runways: Runway[]): AirportCatalogEntry {
   };
 }
 
+export type AirportKind = "airport" | "heliport";
+
 export class AirportLookup {
   private airports: AirportRow[] = [];
+  private heliports: AirportRow[] = [];
   private runwaysByIcao = new Map<string, Runway[]>();
   private ready: Promise<void>;
 
@@ -90,23 +93,28 @@ export class AirportLookup {
   async load(): Promise<void> {
     const airportRows = await loadCsv(this.airportsPath);
     this.airports = [];
+    this.heliports = [];
     for (const row of airportRows) {
       const icao = row.icao_code || row.gps_code || row.ident;
-      if (!icao || row.scheduled_service !== "yes") continue;
-      if (!["large_airport", "medium_airport"].includes(row.type)) continue;
+      if (!icao) continue;
       const centerLat = +row.latitude_deg;
       const centerLon = +row.longitude_deg;
       if (!Number.isFinite(centerLat) || !Number.isFinite(centerLon)) continue;
-      this.airports.push({
+      const entry: AirportRow = {
         icao,
         iata: row.iata_code ?? "",
         name: row.name,
         type: row.type,
         centerLat: round6(centerLat),
         centerLon: round6(centerLon),
-        scheduled: true,
+        scheduled: row.scheduled_service === "yes",
         wikipediaLink: row.wikipedia_link ?? "",
-      });
+      };
+      if (row.type === "heliport") {
+        this.heliports.push(entry);
+      } else if (entry.scheduled && ["large_airport", "medium_airport"].includes(row.type)) {
+        this.airports.push(entry);
+      }
     }
 
     const runwayRows = await loadCsv(this.runwaysPath);
@@ -131,12 +139,15 @@ export class AirportLookup {
       this.runwaysByIcao.set(ident, list);
     }
 
-    // Drop airports with no drawable runways.
+    // Drop airports with no drawable runways (heliports keep their pad-less entry).
     this.airports = this.airports.filter((ap) => (this.runwaysByIcao.get(ap.icao)?.length ?? 0) > 0);
-    console.log(`[airports] indexed ${this.airports.length} scheduled airports with runways`);
+    console.log(
+      `[airports] indexed ${this.airports.length} scheduled airports with runways, ` +
+        `${this.heliports.length} heliports`,
+    );
   }
 
-  async search(query: string, limit = 15): Promise<AirportSearchResult[]> {
+  async search(query: string, limit = 15, kind: AirportKind = "airport"): Promise<AirportSearchResult[]> {
     await this.ready;
     const q = query.trim();
     if (q.length < 2) return [];
@@ -144,9 +155,10 @@ export class AirportLookup {
     const qUpper = q.toUpperCase();
     const qLower = q.toLowerCase();
     const looksLikeCode = /^[a-z0-9]{2,4}$/i.test(q);
+    const pool = kind === "heliport" ? this.heliports : this.airports;
     const hits: { ap: AirportRow; score: number }[] = [];
 
-    for (const ap of this.airports) {
+    for (const ap of pool) {
       let score = 0;
       if (ap.icao === qUpper) score = 100;
       else if (ap.iata === qUpper) score = 95;
@@ -169,6 +181,18 @@ export class AirportLookup {
       centerLat: ap.centerLat,
       centerLon: ap.centerLon,
     }));
+  }
+
+  /**
+   * Significant public heliports (those carrying an IATA code) to scan for live
+   * activity. Capped to keep the rate-limited scan bounded.
+   */
+  async candidateHeliports(limit = 80): Promise<string[]> {
+    await this.ready;
+    return this.heliports
+      .filter((h) => h.iata)
+      .slice(0, limit)
+      .map((h) => h.icao);
   }
 
   async findNearby(
@@ -201,10 +225,12 @@ export class AirportLookup {
     const bundled = AIRPORT_CATALOG[icao];
     if (bundled) return bundled;
 
-    const row = this.airports.find((ap) => ap.icao === icao);
+    const row =
+      this.airports.find((ap) => ap.icao === icao) ?? this.heliports.find((ap) => ap.icao === icao);
     if (!row) return undefined;
-    const runways = this.runwaysByIcao.get(icao);
-    if (!runways?.length) return undefined;
+    const runways = this.runwaysByIcao.get(icao) ?? [];
+    // Heliports rarely have runway geometry; they're still valid to center on.
+    if (row.type !== "heliport" && runways.length === 0) return undefined;
     return entryFromRow(row, runways);
   }
 }

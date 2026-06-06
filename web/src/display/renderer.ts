@@ -34,6 +34,7 @@ import {
   drawAircraftGlyph,
   GLYPH_SCALE,
   resolveSilhouette,
+  type SilhouetteKind,
 } from "./aircraftGlyph.js";
 import tzlookup from "tz-lookup";
 import { carrierLogos } from "../lib/carrierLogos.js";
@@ -130,6 +131,8 @@ export class Renderer {
   private tickerOffset = 0;
   /** Cached auto-fit radius (miles) per airport, so we don't remeasure each frame. */
   private zoomCache: { icao: string; radius: number } | null = null;
+  /** Current frame's pixels-per-meter, for sizing glyphs against the ground. */
+  private pxPerM = 0;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -292,6 +295,7 @@ export class Renderer {
     ctx.fillRect(0, 0, this.w, this.h);
 
     const pxPerM = pxPerMeter(this.w, this.h, cfg.radiusMiles);
+    this.pxPerM = pxPerM;
     const proj: ProjOpts = {
       rotationDeg: cfg.rotationDeg,
       mirrorX: cfg.mirrorX,
@@ -301,11 +305,17 @@ export class Renderer {
       screenH: this.h,
     };
 
-    this.updateSky(cfg, now);
-    this.drawTint(cfg);
-    this.drawSky(cfg, proj);
-    if (cfg.showMeteorShowers) this.drawMeteorShowers(cfg, proj);
-    this.drawOverlays(cfg, proj);
+    // "basic" theme: bare glyphs + flight number only — skip every other layer.
+    const basic = cfg.theme === "basic";
+
+    if (!basic) {
+      this.updateSky(cfg, now);
+      this.drawTint(cfg);
+      this.drawSky(cfg, proj);
+      if (cfg.showMeteorShowers) this.drawMeteorShowers(cfg, proj);
+      this.drawOverlays(cfg, proj);
+    }
+    // Runways are kept in basic mode for spatial context.
     if (cfg.showAirport) this.drawAirport(cfg, proj);
 
     const tt = now - RENDER_DELAY_MS;
@@ -352,18 +362,22 @@ export class Renderer {
     visible.sort((a, b) => b.rangeMi - a.rangeMi);
 
     // Trails + glyphs for everyone.
-    if (cfg.showDestArc) for (const v of visible) this.drawDestArc(cfg, proj, v);
-    for (const v of visible) this.drawTrail(cfg, proj, v, tt);
+    if (!basic) {
+      if (cfg.showDestArc) for (const v of visible) this.drawDestArc(cfg, proj, v);
+      for (const v of visible) this.drawTrail(cfg, proj, v, tt);
+    }
     for (const v of visible) this.drawGlyph(cfg, v);
 
     // Labels: nearest are at the END after the sort.
     const byNear = [...visible].reverse(); // nearest first
     this.drawLabels(cfg, byNear);
 
-    if (cfg.theme === "focus" && byNear.length) this.drawDetailPanel(cfg, byNear[0]);
     if (cfg.showAirport) this.drawAirportPlaque(cfg);
-    if (cfg.showWeather) this.drawWeather(cfg);
-    if (cfg.showDestTicker) this.drawDestTicker(cfg, byNear, frameDt);
+    if (!basic) {
+      if (cfg.theme === "focus" && byNear.length) this.drawDetailPanel(cfg, byNear[0]);
+      if (cfg.showWeather) this.drawWeather(cfg);
+      if (cfg.showDestTicker) this.drawDestTicker(cfg, byNear, frameDt);
+    }
   }
 
   /** Display feeds live weather here (fetched over REST). */
@@ -624,6 +638,13 @@ export class Renderer {
 
     const ctx = this.ctx;
     const rwyRgb: [number, number, number] = [150, 180, 220];
+
+    // Heliports carry no runway geometry — mark the pad with a circled "H".
+    if (!ap.runways.length) {
+      this.drawHeliportPad(cfg, proj, ap, rwyRgb);
+      return;
+    }
+
     for (const r of ap.runways) {
       const a = this.toScreen(r.le, cfg, proj);
       const b = this.toScreen(r.he, cfg, proj);
@@ -649,6 +670,32 @@ export class Renderer {
       ctx.stroke();
       ctx.restore();
     }
+  }
+
+  /** Circled "H" pad marker for heliports (no runway geometry to draw). */
+  private drawHeliportPad(
+    cfg: Config,
+    proj: ProjOpts,
+    ap: { centerLat: number; centerLon: number },
+    rgb: [number, number, number],
+  ): void {
+    const ctx = this.ctx;
+    const c = this.toScreen([ap.centerLat, ap.centerLon], cfg, proj);
+    const r = 18;
+    ctx.save();
+    ctx.fillStyle = rgba(rgb, 0.1 * cfg.brightness);
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = rgba(rgb, 0.55 * cfg.brightness);
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = rgba([210, 226, 255], 0.85 * cfg.brightness);
+    ctx.font = `600 ${Math.round(r * 1.1)}px ${cfg.fonts.label}`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("H", c.x, c.y + 1);
+    ctx.restore();
   }
 
   /** Fixed corner plaque — top-right, away from focus detail panel and traffic labels. */
@@ -1080,12 +1127,33 @@ export class Renderer {
     ctx.restore();
   }
 
+  /**
+   * Glyph half-size in px. Wide views keep the configured (exaggerated) size for
+   * visibility. Zoomed in to airport scale, fixed-px glyphs would be drawn far
+   * larger than the real aircraft and overhang the runway, so we blend toward a
+   * footprint that matches the plane's true length — keeping it sitting on the
+   * runway instead of spilling across it.
+   */
+  private glyphSize(cfg: Config, kind: SilhouetteKind): number {
+    const fixed = cfg.glyphSizePx * GLYPH_SCALE[kind];
+    if (this.pxPerM <= 0) return fixed;
+    // Nominal real length (m) per family; the drawn silhouette spans ~2.2·s.
+    const lengthM = 34 * GLYPH_SCALE[kind];
+    const FOOTPRINT = 2.2;
+    const physical = (lengthM * this.pxPerM) / FOOTPRINT;
+    // Allow a small exaggeration over true size; never vanish entirely.
+    const cap = Math.max(physical * 1.6, 6);
+    // Blend in the cap only at airport scale (~under 2.4 mi radius).
+    const blend = clamp01((2.4 - cfg.radiusMiles) / 1.2);
+    return fixed + (Math.min(fixed, cap) - fixed) * blend;
+  }
+
   // --- glyph: type-aware luminous silhouette ---
   private drawGlyph(cfg: Config, v: Visible): void {
     const ctx = this.ctx;
     const color = v.emergency ? hexToRgb(cfg.palette.warn) : v.color;
     const silhouette = resolveSilhouette(v.tr.ac);
-    const s = cfg.glyphSizePx * GLYPH_SCALE[silhouette];
+    const s = this.glyphSize(cfg, silhouette);
 
     ctx.save();
     ctx.translate(v.p.x, v.p.y);
@@ -1117,7 +1185,7 @@ export class Renderer {
     );
     ctx.restore();
 
-    if (cfg.showCarrierBadge && cfg.glyphSizePx >= 10) {
+    if (cfg.theme !== "basic" && cfg.showCarrierBadge && cfg.glyphSizePx >= 10) {
       this.drawCarrierBadge(cfg, v, s);
     }
   }
@@ -1190,7 +1258,7 @@ export class Renderer {
 
   private drawLabels(cfg: Config, nearestFirst: Visible[]): void {
     const limit =
-      cfg.labelDensity === "all"
+      cfg.theme === "basic" || cfg.labelDensity === "all"
         ? nearestFirst.length
         : cfg.labelDensity === "nearestN"
           ? cfg.nearestN
@@ -1213,7 +1281,9 @@ export class Renderer {
     for (let i = 0; i < Math.min(limit, nearestFirst.length); i++) {
       // Nearest labels brightest; gently dim further ones (but keep readable).
       const prom = 1 - i / Math.max(1, nearestFirst.length);
-      this.drawLabel(cfg, nearestFirst[i], 0.7 + 0.3 * prom);
+      // Basic theme dims flight numbers so the planes stay the focus.
+      const strength = cfg.theme === "basic" ? 0.4 : 0.7 + 0.3 * prom;
+      this.drawLabel(cfg, nearestFirst[i], strength);
     }
   }
 
@@ -1257,6 +1327,11 @@ export class Renderer {
   }
 
   private labelLines(cfg: Config, ac: Aircraft): { text: string; kind: "title" | "sub" }[] {
+    // Basic theme: just the flight number (fall back to hex), nothing else.
+    if (cfg.theme === "basic") {
+      const id = ac.flight?.trim() || ac.hex.toUpperCase();
+      return id ? [{ text: id, kind: "title" }] : [];
+    }
     const f = cfg.showFields;
     const out: { text: string; kind: "title" | "sub" }[] = [];
     const title = f.flight ? ac.flight ?? ac.hex.toUpperCase() : ac.airline;

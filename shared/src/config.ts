@@ -5,7 +5,7 @@ import { DEFAULT_AIRPORT_ICAO, airportConfigPatch } from "./airport-resolve.js";
 // (projector) and the control panel (phone). Everything here is live-tunable
 // and persisted server-side so changes survive reboots.
 
-export type Theme = "ambient" | "telemetry" | "focus";
+export type Theme = "ambient" | "telemetry" | "focus" | "basic";
 export type LabelDensity = "all" | "nearestN" | "nearestOnly";
 export type DataSource = "radio" | "api";
 

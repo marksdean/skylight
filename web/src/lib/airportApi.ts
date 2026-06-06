@@ -66,16 +66,25 @@ export async function fetchWeather(): Promise<WeatherSnapshot | null> {
 export async function fetchActiveAirports(
   limit = 12,
   refresh = false,
+  kind: AirportSearchKind = "airport",
 ): Promise<ActiveAirportsResponse> {
   const params = new URLSearchParams({ limit: String(limit) });
   if (refresh) params.set("refresh", "1");
+  if (kind !== "airport") params.set("kind", kind);
   const res = await fetch(`/api/airports/active?${params}`);
   if (!res.ok) throw new Error(`Active airports failed (${res.status})`);
   return res.json() as Promise<ActiveAirportsResponse>;
 }
 
-export async function fetchSearchAirports(q: string, limit = 15): Promise<AirportSearchResult[]> {
+export type AirportSearchKind = "airport" | "heliport";
+
+export async function fetchSearchAirports(
+  q: string,
+  limit = 15,
+  kind: AirportSearchKind = "airport",
+): Promise<AirportSearchResult[]> {
   const params = new URLSearchParams({ q, limit: String(limit) });
+  if (kind !== "airport") params.set("kind", kind);
   const res = await fetch(`/api/airports/search?${params}`);
   if (!res.ok) throw new Error(`Airport search failed (${res.status})`);
   return res.json() as Promise<AirportSearchResult[]>;
