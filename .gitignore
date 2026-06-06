@@ -1,6 +1,7 @@
 node_modules/
 dist/
 *.log
+.pnpm-*
 
 # runtime state (persisted config, route + TLE caches)
 server/data/
