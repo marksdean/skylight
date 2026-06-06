@@ -4,7 +4,6 @@ dist/
 
 # runtime state (persisted config, route + TLE caches)
 server/data/
-data/
 
 # editor / OS
 .DS_Store
